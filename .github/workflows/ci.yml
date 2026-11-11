@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   code:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
         run: npm run server:build
 
   server-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
