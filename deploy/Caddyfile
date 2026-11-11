@@ -1,0 +1,21 @@
+# Caddy gets and renews the https certificate by itself. DOMAIN comes from deploy/.env.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Driver photos are uploaded as base64 (up to 3 MB each), so allow a little more than that.
+	request_body {
+		max_size 6MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy app:5000 {
+		health_uri /api/health
+		health_interval 30s
+	}
+}

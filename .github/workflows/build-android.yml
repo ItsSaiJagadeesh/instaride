@@ -1,0 +1,174 @@
+# One-click Android build. On GitHub: Actions tab, "Build Android app", "Run workflow".
+#   demo  = the server-free demo (sign in with 9182631581 / 123456). Needs nothing else.
+#   live  = the real app pointing at your server. Needs your server address.
+# Signing: add the four ANDROID_* secrets once (see scripts/make-upload-key.sh) and every build is signed with YOUR key.
+# Without them the build is signed with a throwaway key: fine for installing on phones, NOT for Google Play.
+name: Build Android app
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "What to build"
+        type: choice
+        options: [demo, live]
+        default: demo
+      server_address:
+        description: "Live only: your server address WITHOUT https:// (for example api.yourdomain.in)"
+        type: string
+        default: ""
+      allow_http:
+        description: "Live test build only: allow plain http (a server on your own Wi-Fi). Never for Google Play."
+        type: boolean
+        default: false
+      play_bundle:
+        description: "Also build the .aab file for Google Play (needs the signing secrets and a live https address)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-android
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check the choices
+        env:
+          KIND: ${{ inputs.kind }}
+          SERVER_ADDRESS: ${{ inputs.server_address }}
+          ALLOW_HTTP: ${{ inputs.allow_http }}
+          PLAY_BUNDLE: ${{ inputs.play_bundle }}
+          HAS_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          if [ "$KIND" = "live" ]; then
+            [ -n "$SERVER_ADDRESS" ] || fail "Live build: please fill in the server address (for example api.yourdomain.in)."
+            [[ "$SERVER_ADDRESS" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || fail "The server address must be just a name like api.yourdomain.in, with no https:// and no slash."
+            case "$SERVER_ADDRESS" in *REPLACE_WITH*) fail "That is still the placeholder. Use your real server address." ;; esac
+          fi
+          if [ "$PLAY_BUNDLE" = "true" ]; then
+            [ "$KIND" = "live" ] || fail "The Google Play file must be a live build, not the demo."
+            [ "$ALLOW_HTTP" != "true" ] || fail "A Google Play build must not allow plain http. Untick allow_http."
+            [ "$HAS_KEY" = "true" ] || fail "The Google Play file must be signed with your own key. Add the four ANDROID_* secrets first (see scripts/make-upload-key.sh)."
+            if [[ "$SERVER_ADDRESS" =~ ^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; then fail "A Google Play build cannot point at a local address."; fi
+          fi
+          {
+            echo "ANDROID_VERSION_CODE=${GITHUB_RUN_NUMBER}"
+            if [ "$KIND" = "demo" ]; then
+              echo "EXPO_PUBLIC_DEMO=1"
+            else
+              echo "EXPO_PUBLIC_DOMAIN=${SERVER_ADDRESS}"
+              echo "EAS_BUILD=1"
+              if [ "$PLAY_BUNDLE" = "true" ]; then echo "EAS_BUILD_PROFILE=app-production"; else echo "EAS_BUILD_PROFILE=app-preview"; fi
+              if [ "$ALLOW_HTTP" = "true" ]; then echo "ALLOW_CLEARTEXT=1"; fi
+            fi
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install packages
+        run: npm ci --no-audit --no-fund
+
+      - name: Make the Android project
+        run: npx expo prebuild --platform android --no-install --clean
+
+      - name: Build
+        env:
+          PLAY_BUNDLE: ${{ inputs.play_bundle }}
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          cd android
+          chmod +x gradlew
+          tasks=(assembleRelease)
+          if [ "$PLAY_BUNDLE" = "true" ]; then tasks+=(bundleRelease); fi
+          # Expo's default gives Gradle 2 GB, which React Native builds can run out of. GitHub's machines have plenty more.
+          ./gradlew "${tasks[@]}" --no-daemon --stacktrace \
+            "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g" \
+            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+
+      - name: Sign
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PLAY_BUNDLE: ${{ inputs.play_bundle }}
+        run: |
+          ks="$RUNNER_TEMP/upload.jks"
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
+            signing="your own key"
+          else
+            KS_PASS="$(openssl rand -hex 16)"; KEY_PASS="$KS_PASS"; KEY_ALIAS="temporary"
+            echo "::add-mask::$KS_PASS"
+            keytool -genkeypair -keystore "$ks" -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 3650 \
+              -storepass "$KS_PASS" -keypass "$KEY_PASS" -dname "CN=InstaRide temporary test key" > /dev/null
+            signing="a throwaway key (fine for installing on phones, NOT for Google Play)"
+          fi
+          export KS_PASS KEY_PASS
+
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          [ -x "$apksigner" ] || { echo "::error::apksigner was not found on this machine"; exit 1; }
+          mkdir -p dist
+          "$apksigner" sign --ks "$ks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --out dist/instaride.apk android/app/build/outputs/apk/release/app-release.apk
+          "$apksigner" verify --print-certs dist/instaride.apk | head -3
+
+          if [ "$PLAY_BUNDLE" = "true" ]; then
+            cp android/app/build/outputs/bundle/release/app-release.aab dist/instaride.aab
+            jarsigner -keystore "$ks" -storepass:env KS_PASS -keypass:env KEY_PASS dist/instaride.aab "$KEY_ALIAS" > /dev/null
+            jarsigner -verify dist/instaride.aab > /dev/null
+          fi
+          rm -f "$ks"
+
+          {
+            echo "commit:        $GITHUB_SHA"
+            echo "built:         $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "version code:  $ANDROID_VERSION_CODE"
+            echo "signed with:   $signing"
+            (cd dist && sha256sum ./* && stat -c '%s bytes  %n' ./*)
+          } > dist/build-info.txt
+          cat dist/build-info.txt
+
+          {
+            echo "## Android build finished"
+            echo ""
+            echo "Download **instaride-android** from the *Artifacts* box at the bottom of this page."
+            echo ""
+            echo "- Signed with: ${signing}"
+            echo "- On your phone: open the downloaded \`instaride.apk\`, and allow \"install unknown apps\" if Android asks."
+            if [ "$PLAY_BUNDLE" = "true" ]; then echo "- Upload \`instaride.aab\` to the Google Play Console."; fi
+            echo "- If this repository is public, anyone with a GitHub account can download these files. They contain no secrets."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instaride-android
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Keep the build log if something went wrong
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/gradle.log
+          retention-days: 7
+          if-no-files-found: ignore

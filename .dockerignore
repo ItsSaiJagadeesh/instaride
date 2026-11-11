@@ -1,0 +1,17 @@
+node_modules
+.git
+.expo
+dist
+server_dist
+static-build
+android
+ios
+.env
+.env.*
+!.env.example
+data
+deploy/.env
+deploy/backups
+*.rdb
+*.aof
+appendonlydir

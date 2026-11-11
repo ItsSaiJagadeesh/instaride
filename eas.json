@@ -1,0 +1,100 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "demo-preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_DEMO": "1"
+      }
+    },
+    "demo-rider-preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_DEMO": "1",
+        "APP_VARIANT": "rider",
+        "EXPO_PUBLIC_APP_VARIANT": "rider"
+      }
+    },
+    "demo-driver-preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_DEMO": "1",
+        "APP_VARIANT": "driver",
+        "EXPO_PUBLIC_APP_VARIANT": "driver"
+      }
+    },
+    "app-preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_DOMAIN": "REPLACE_WITH_YOUR_API_HOST",
+        "ALLOW_CLEARTEXT": "1"
+      }
+    },
+    "app-production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_DOMAIN": "REPLACE_WITH_YOUR_API_HOST"
+      }
+    },
+    "rider-preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "rider",
+        "EXPO_PUBLIC_APP_VARIANT": "rider",
+        "EXPO_PUBLIC_DOMAIN": "REPLACE_WITH_YOUR_API_HOST"
+      }
+    },
+    "driver-preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "driver",
+        "EXPO_PUBLIC_APP_VARIANT": "driver",
+        "EXPO_PUBLIC_DOMAIN": "REPLACE_WITH_YOUR_API_HOST"
+      }
+    },
+    "rider-production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "APP_VARIANT": "rider",
+        "EXPO_PUBLIC_APP_VARIANT": "rider",
+        "EXPO_PUBLIC_DOMAIN": "REPLACE_WITH_YOUR_API_HOST"
+      }
+    },
+    "driver-production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "APP_VARIANT": "driver",
+        "EXPO_PUBLIC_APP_VARIANT": "driver",
+        "EXPO_PUBLIC_DOMAIN": "REPLACE_WITH_YOUR_API_HOST"
+      }
+    }
+  }
+}
