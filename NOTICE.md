@@ -20,3 +20,7 @@ this whole project, including all changes.
 - Removed the code that auto-started a Redis daemon; Redis is now configured with `REDIS_URL`.
 
 Original work: RideFlow authors. Changes: InstaRide.
+
+## Mappls Maps SDK
+The Android map uses `mappls-map-react-native` (MIT licence, by Mappls / MapmyIndia). Use of the Mappls service is governed by Mappls's API terms
+and conditions. The Mappls logo and copyright must remain visible in the app.

@@ -51,7 +51,7 @@ npx eas-cli build --platform android --profile app-production
 - The app's identity is `in.instaride.app`. **This cannot be changed after the first upload to Google Play.** Change `android.package`
   in `app.json` first if you want a different one.
 
-> **Map key:** the Android app needs a Google Maps key for its map (GO_LIVE.md, step 6b). Without the `GOOGLE_MAPS_API_KEY` secret a build shows a placeholder where the map would be, and the Play build refuses to run.
+> **Map:** the Android app uses Mappls (GO_LIVE.md, step 6b). Without the `MAPPLS_ANDROID_CONFIG_ZIP_BASE64` secret and your own signing key a build shows a placeholder where the map would be, and the Play build refuses to run. Register **every** key that signs the app with Mappls, including Google's app-signing key once the app is on Play, because the Mappls files are issued per key.
 
 ## 3. Play Console (what Google asks)
 
@@ -72,7 +72,7 @@ npx eas-cli build --platform android --profile app-production
   | Users can request deletion | Yes | In app and by email | |
 
 - **Permissions:** location (foreground only; the app does not track in the background), camera (drivers photograph documents).
-  The build removes microphone, storage and "draw over other apps" permissions on purpose.
+  The build removes microphone, storage, "draw over other apps", biometrics, start-at-boot and foreground-service permissions on purpose (libraries add them, the app does not use them).
 - **Content rating, target audience (18+), ads (none)** questionnaires.
 - **Testing before production, CHECK:** new personal developer accounts have had to run a **closed test with a minimum number of
   testers for a minimum number of days** before applying for production. Organisation accounts have been exempt. Read the current rule in the Console.

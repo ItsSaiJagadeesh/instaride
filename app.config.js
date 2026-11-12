@@ -66,7 +66,13 @@ function withGoogleMaps(config) {
   return { ...config, android: { ...config.android, config: { ...(config.android && config.android.config), googleMaps: { apiKey: key } } } };
 }
 
-module.exports = (args) => withGoogleMaps(withVersionCode(build(args)));
+// Mappls (the map for the real app): only for builds that were set up with the two Mappls licence files.
+function withMappls(config) {
+  if (process.env.MAPPLS_ENABLED !== '1') return config;
+  return { ...config, plugins: [...(config.plugins || []), './plugins/with-mappls'] };
+}
+
+module.exports = (args) => withMappls(withGoogleMaps(withVersionCode(build(args))));
 
 function build({ config }) {
   checkCloudBuild();

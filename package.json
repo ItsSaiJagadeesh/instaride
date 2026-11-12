@@ -54,6 +54,7 @@
     "express": "^5.0.1",
     "http-proxy-middleware": "^3.0.5",
     "ioredis": "^5.9.2",
+    "mappls-map-react-native": "2.0.3",
     "pg": "^8.18.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

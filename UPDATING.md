@@ -23,3 +23,9 @@ looks wrong with old test data you can wipe it: `docker exec instaride-redis red
 New files and folders: `Dockerfile`, `.dockerignore`, `deploy/`, `.github/`, `GO_LIVE.md`, `scripts/make-upload-key.*`. Nothing was removed and no new
 npm package is needed. Copy the new files over your folder, then restart the server. Open the console: there is a new **Go-live meter** tab.
 To run behind a proxy or in Docker the server now understands `TRUST_PROXY=1`; on your laptop you do not need it.
+
+## Update that adds Mappls (map, search and routes)
+
+New dependency: run `npm install` once after copying the files. New files: `plugins/with-mappls.js`, `react-native.config.js`, `lib/places.ts`,
+`lib/places-core.ts`, `scripts/make-mappls-secret.ps1`, `scripts/places-core-test.ts`. Nothing was removed. The driver app now follows the phone's GPS while
+it is open, so riders see the driver move. Builds without the Mappls files still work and show the map placeholder.

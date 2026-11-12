@@ -46,6 +46,7 @@ jobs:
           PLAY_BUNDLE: ${{ inputs.play_bundle }}
           HAS_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
           HAS_MAPS_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY != '' }}
+          HAS_MAPPLS: ${{ secrets.MAPPLS_ANDROID_CONFIG_ZIP_BASE64 != '' }}
         run: |
           fail() { echo "::error::$1"; exit 1; }
           if [ "$KIND" = "live" ]; then
@@ -57,8 +58,16 @@ jobs:
             [ "$KIND" = "live" ] || fail "The Google Play file must be a live build, not the demo."
             [ "$ALLOW_HTTP" != "true" ] || fail "A Google Play build must not allow plain http. Untick allow_http."
             [ "$HAS_KEY" = "true" ] || fail "The Google Play file must be signed with your own key. Add the four ANDROID_* secrets first (see scripts/make-upload-key.sh)."
-            [ "$HAS_MAPS_KEY" = "true" ] || fail "The Google Play file needs the map to work. Add the GOOGLE_MAPS_API_KEY secret first (see GO_LIVE.md)."
+            [ "$HAS_MAPPLS" = "true" ] || fail "The Google Play file needs the map to work. Add the MAPPLS_ANDROID_CONFIG_ZIP_BASE64 secret first (see GO_LIVE.md)."
             if [[ "$SERVER_ADDRESS" =~ ^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; then fail "A Google Play build cannot point at a local address."; fi
+          fi
+          mapplsOn=false
+          if [ "$HAS_MAPPLS" = "true" ]; then
+            if [ "$HAS_KEY" = "true" ]; then
+              mapplsOn=true
+            else
+              echo "::warning::The Mappls files are saved, but this build is signed with a throwaway key, which Mappls would reject. Using the placeholder map. Add the four ANDROID_* secrets to use Mappls."
+            fi
           fi
           {
             echo "ANDROID_VERSION_CODE=${GITHUB_RUN_NUMBER}"
@@ -69,7 +78,11 @@ jobs:
               echo "EAS_BUILD=1"
               if [ "$PLAY_BUNDLE" = "true" ]; then echo "EAS_BUILD_PROFILE=app-production"; else echo "EAS_BUILD_PROFILE=app-preview"; fi
               if [ "$ALLOW_HTTP" = "true" ]; then echo "ALLOW_CLEARTEXT=1"; fi
-              if [ "$HAS_MAPS_KEY" = "true" ]; then echo "EXPO_PUBLIC_MAPS=native"; fi
+              if [ "$HAS_MAPS_KEY" = "true" ] && [ "$mapplsOn" != "true" ]; then echo "EXPO_PUBLIC_MAPS=native"; fi
+            fi
+            if [ "$mapplsOn" = "true" ]; then
+              echo "MAPPLS_ENABLED=1"
+              echo "EXPO_PUBLIC_MAPS=mappls"
             fi
           } >> "$GITHUB_ENV"
 
@@ -87,6 +100,31 @@ jobs:
 
       - name: Install packages
         run: npm ci --no-audit --no-fund
+
+      - name: Unpack the Mappls files
+        if: env.MAPPLS_ENABLED == '1'
+        env:
+          MAPPLS_ZIP_B64: ${{ secrets.MAPPLS_ANDROID_CONFIG_ZIP_BASE64 }}
+        run: |
+          dir="$RUNNER_TEMP/mappls"
+          mkdir -p "$dir"
+          if ! printf '%s' "$MAPPLS_ZIP_B64" | base64 -d > "$RUNNER_TEMP/mappls.zip" 2>/dev/null; then
+            echo "::error::MAPPLS_ANDROID_CONFIG_ZIP_BASE64 is not valid. Copy it again from the Mappls zip (see GO_LIVE.md)."
+            exit 1
+          fi
+          if ! unzip -o -j -q "$RUNNER_TEMP/mappls.zip" '*.a.olf' '*.a.conf' -d "$dir"; then
+            echo "::error::The Mappls zip must contain one .a.olf and one .a.conf file."
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/mappls.zip"
+          olf=$(find "$dir" -name '*.a.olf' | wc -l)
+          conf=$(find "$dir" -name '*.a.conf' | wc -l)
+          if [ "$olf" != "1" ] || [ "$conf" != "1" ]; then
+            echo "::error::Expected exactly one .a.olf and one .a.conf file, found $olf and $conf."
+            exit 1
+          fi
+          echo "MAPPLS_CONFIG_DIR=$dir" >> "$GITHUB_ENV"
+          echo "Mappls files unpacked (their contents are never shown)."
 
       - name: Make the Android project
         env:
@@ -127,12 +165,17 @@ jobs:
             signing="a throwaway key (fine for installing on phones, NOT for Google Play)"
           fi
           export KS_PASS KEY_PASS
-          if [ "${EXPO_PUBLIC_MAPS:-}" = "native" ]; then map_note="live Google map"; else map_note="placeholder (no GOOGLE_MAPS_API_KEY secret, or a demo build)"; fi
+          case "${EXPO_PUBLIC_MAPS:-}" in
+            mappls) map_note="Mappls map" ;;
+            native) map_note="live Google map" ;;
+            *) map_note="placeholder (no Mappls files, or not signed with your own key)" ;;
+          esac
 
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
           [ -x "$apksigner" ] || { echo "::error::apksigner was not found on this machine"; exit 1; }
           mkdir -p dist
           "$apksigner" sign --ks "$ks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --v4-signing-enabled false \
             --out dist/instaride.apk android/app/build/outputs/apk/release/app-release.apk
           "$apksigner" verify --print-certs dist/instaride.apk | head -3
 
@@ -142,6 +185,15 @@ jobs:
             jarsigner -verify dist/instaride.aab > /dev/null
           fi
           rm -f "$ks"
+
+          if [ "${MAPPLS_ENABLED:-}" = "1" ]; then
+            if unzip -l dist/instaride.apk | grep -qi 'mappls'; then
+              echo "Check passed: the Mappls files are inside the app."
+            else
+              echo "::error::This build was meant to include Mappls, but the finished app does not contain the Mappls files."
+              exit 1
+            fi
+          fi
 
           {
             echo "commit:        $GITHUB_SHA"

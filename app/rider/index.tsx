@@ -4,7 +4,8 @@ import {
   ActivityIndicator, Dimensions, ScrollView, Linking, Keyboard, Share,
 } from 'react-native';
 import { router, Redirect } from 'expo-router';
-import MapView, { Marker, PROVIDER_DEFAULT } from '@/components/MapView';
+import MapView, { Marker, PROVIDER_DEFAULT, RouteLine } from '@/components/MapView';
+import { MAPPLS_ON, searchPlaces, reversePlace, getRoute, type RouteInfo } from '@/lib/places';
 import AppModal, { useAppModal } from '@/components/AppModal';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -74,6 +75,7 @@ function RiderScreenInner() {
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [route, setRoute] = useState<RouteInfo | null>(null);
 
   const phaseRef = useRef<RiderPhase>(phase);
   const activeRideRef = useRef<Ride | null>(activeRide);
@@ -81,6 +83,27 @@ function RiderScreenInner() {
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
   useEffect(() => { locationRef.current = location; }, [location]);
+
+  // The road route from the rider to the chosen drop-off (Mappls builds only). One request per chosen place,
+  // keyed to a rounded position so a small GPS wobble does not trigger another request.
+  const routeFrom = location ? `${location.lat.toFixed(3)},${location.lng.toFixed(3)}` : '';
+  const routeTo = dropoffCoord ? `${dropoffCoord.lat.toFixed(5)},${dropoffCoord.lng.toFixed(5)}` : '';
+  const wantsRoute = MAPPLS_ON && !!routeFrom && !!routeTo && (phase === 'selecting_dropoff' || phase === 'confirming');
+  useEffect(() => {
+    if (!wantsRoute || !locationRef.current || !dropoffCoord) {
+      setRoute(null);
+      return;
+    }
+    let cancelled = false;
+    getRoute(locationRef.current, dropoffCoord).then((r) => {
+      if (cancelled) return;
+      setRoute(r);
+      if (r && r.points.length > 1) {
+        (mapRef.current as any)?.fitToCoordinates?.(r.points.map((p) => ({ latitude: p.lat, longitude: p.lng })));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [wantsRoute, routeFrom, routeTo]);
 
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   useEffect(() => {
@@ -149,13 +172,17 @@ function RiderScreenInner() {
     setLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
 
     try {
-      const geocode = await Location.reverseGeocodeAsync({
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-      });
-      if (geocode.length > 0) {
-        const g = geocode[0];
-        setPickupAddress(`${g.street || ''} ${g.city || ''}`.trim() || 'Current Location');
+      if (MAPPLS_ON) {
+        setPickupAddress(await reversePlace(loc.coords.latitude, loc.coords.longitude));
+      } else {
+        const geocode = await Location.reverseGeocodeAsync({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+        });
+        if (geocode.length > 0) {
+          const g = geocode[0];
+          setPickupAddress(`${g.street || ''} ${g.city || ''}`.trim() || 'Current Location');
+        }
       }
     } catch {}
   };
@@ -221,7 +248,7 @@ function RiderScreenInner() {
     const coord = e.nativeEvent.coordinate;
     setDropoffCoord({ lat: coord.latitude, lng: coord.longitude });
 
-    if (Platform.OS !== 'web') {
+    if (Platform.OS !== 'web' && !MAPPLS_ON) {
       (async () => {
         try {
           const geocode = await Location.reverseGeocodeAsync({
@@ -243,14 +270,9 @@ function RiderScreenInner() {
     }
   };
 
+  // Looks the tapped spot up (Mappls on the phone map, our server otherwise). Never fails: falls back to coordinates.
   const reverseGeocodeWeb = async (lat: number, lng: number) => {
-    try {
-      const res = await apiRequest('GET', `/api/geocode/reverse?lat=${lat}&lng=${lng}`);
-      const data = await res.json();
-      setDropoffAddress(data.label || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-    } catch {
-      setDropoffAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-    }
+    setDropoffAddress(await reversePlace(lat, lng));
   };
 
   // Search runs only when the rider presses search (the free address service does not allow search-as-you-type).
@@ -293,9 +315,8 @@ function RiderScreenInner() {
     setAddressSearching(true);
     setShowSuggestions(false);
     try {
-      const res = await apiRequest('GET', `/api/geocode/search?q=${encodeURIComponent(q)}`);
-      const places = await res.json();
-      if (Array.isArray(places) && places.length > 0) {
+      const places = await searchPlaces(q, locationRef.current);
+      if (places.length > 0) {
         setAddressSuggestions(places);
         setShowSuggestions(true);
       } else {
@@ -587,6 +608,8 @@ function RiderScreenInner() {
               </View>
             </Marker>
           )}
+
+          {route && route.points.length > 1 && <RouteLine id="trip" coordinates={route.points} />}
         </MapView>
       )}
 
@@ -792,6 +815,12 @@ function RiderScreenInner() {
                 </Pressable>
               ))}
             </View>
+          )}
+
+          {route && (
+            <Text style={styles.routeNote}>
+              By road: about {route.km.toFixed(1)} km, {Math.max(1, Math.round(route.minutes))} min
+            </Text>
           )}
 
           <View style={styles.fareCard}>
@@ -1163,6 +1192,7 @@ const styles = StyleSheet.create({
   },
   btnPressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
   btnDisabled: { opacity: 0.6 },
+  routeNote: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textLight, textAlign: 'center', marginBottom: 8 },
   fareCard: {
     backgroundColor: Colors.background, borderRadius: 16, padding: 16, marginBottom: 16,
   },

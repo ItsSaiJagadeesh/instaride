@@ -321,4 +321,7 @@ const webStyles = StyleSheet.create({
   },
 });
 
+/** Routes are drawn only on the phone map. */
+export const RouteLine = (_props: { id?: string; coordinates: { lat: number; lng: number }[]; color?: string; width?: number }) => null;
+
 export default WebMapView;

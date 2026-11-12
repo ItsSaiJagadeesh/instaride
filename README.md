@@ -119,8 +119,8 @@ npx eas-cli build --platform android --profile app-production   # .aab to upload
 ```
 
 The production build refuses to run if the server address is a placeholder or a local address, or if plain http is on.
-The Android map needs a Google Maps key (`GOOGLE_MAPS_API_KEY`, see **GO_LIVE.md** step 6b); builds without one show a map placeholder instead.
-The app asks for location and (for drivers) the camera, and removes microphone, storage and "draw over apps" permissions.
+The Android map, search and routes use Mappls and need two Mappls licence files (**GO_LIVE.md** step 6b); builds without them show a map placeholder instead.
+The app asks for location and (for drivers) the camera, and removes microphone, storage, "draw over apps", biometrics, start-at-boot and foreground-service permissions that libraries would otherwise add.
 The package ID `in.instaride.app` cannot be changed after the first Play Store upload: change it in `app.json` first if you
 want another. See **PLAY_STORE.md** for the Play Console side.
 

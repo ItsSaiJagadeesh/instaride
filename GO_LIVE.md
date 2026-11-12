@@ -52,16 +52,21 @@ and remove them after approval.
 - `kind = live`, `server_address = api.yourdomain.in`: the real app pointing at your server.
 When it finishes, open the run and download **instaride-android** from the Artifacts box. Install `instaride.apk` on a phone.
 
-**6b. A map key for the Android app.** The phone's map needs a Google Maps key built into the app. Without one the app is built with a clearly
-labelled map placeholder (everything else still works), so the demo and early test builds need nothing. For the real app:
-1. In the Google Cloud Console create a project, then enable **Maps SDK for Android** (it asks for a billing account; Google gives a free monthly allowance.
-   Check its current pricing and limits before you rely on it).
-2. Create an **API key**. Under *Application restrictions* choose **Android apps** and add your package name `in.instaride.app` with the **SHA-1** of the
-   key that signs the app. Add one entry per signing key: your upload key (`keytool -list -v -keystore instaride-upload.jks`) and, once the app is on
-   Google Play, Google's app-signing certificate (Play Console, Setup, App signing). Under *API restrictions* allow only Maps SDK for Android.
-3. Add the key as a GitHub secret named `GOOGLE_MAPS_API_KEY`. A live build then includes the real map. The key ends up inside the app file, which is
-   normal for map keys; the restrictions above are what stop others from using it.
-Tick the matching step in the meter when done. The Google Play build refuses to run without this secret.
+**6b. The map (Mappls).** The phone app uses the Mappls map, search and routes. Mappls needs two licence files that are tied to your app's
+package name and to your signing key, so do this **after step 7** (the permanent signing key). Until then a build shows a clearly labelled map
+placeholder and everything else works.
+1. Get your key's fingerprint: run `keytool -list -v -keystore instaride-upload.jks -alias instaride` and copy the **SHA256** line.
+2. In the Mappls console (`auth.mappls.com/console`), create or edit your **Android** app: package name `in.instaride.app`, signing certificate = that SHA-256.
+   Changing the key later means doing this again, because the files are issued per key.
+3. In the app's **Config Files** section download the files as a **ZIP** (it holds one `.a.olf` and one `.a.conf`).
+4. Turn the zip into secret text: `powershell -ExecutionPolicy Bypass -File scripts\make-mappls-secret.ps1 -Zip "C:\path\to\your-zip.zip"`.
+   Copy the text from Notepad into a GitHub secret named `MAPPLS_ANDROID_CONFIG_ZIP_BASE64`, then delete the text file.
+5. Run the build. A Mappls build says `map: Mappls map` in `build-info.txt`. If the files are saved but the build is not signed with your own
+   key, the workflow warns and uses the placeholder instead of a map that Mappls would reject.
+
+Good to know: the two files are packaged **inside every app file**, like any map licence, so anyone holding the app can extract them. They are tied to your
+package name and key, not passwords, but keep them out of the repository. Mappls's terms apply: the Mappls logo and copyright must stay visible,
+and your plan's daily usage limit is shown on its dashboard (usage from the app, web and other apps all counts). Read the terms and limits before you rely on it.
 
 **7. Signing key, once, for Google Play.** Run `bash scripts/make-upload-key.sh` (or `scripts\make-upload-key.ps1` on Windows; needs a JDK).
 Paste the four values from `github-secrets.txt` into the repository's *Settings → Secrets and variables → Actions*, delete that file,

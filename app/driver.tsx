@@ -4,7 +4,8 @@ import {
   ActivityIndicator, Dimensions, ScrollView, Linking, TextInput,
 } from 'react-native';
 import { router, Redirect } from 'expo-router';
-import MapView, { Marker, PROVIDER_DEFAULT } from '@/components/MapView';
+import MapView, { Marker, PROVIDER_DEFAULT, RouteLine } from '@/components/MapView';
+import { MAPPLS_ON, getRoute, type RouteInfo } from '@/lib/places';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,6 +34,8 @@ function DriverScreenInner() {
   const mapRef = useRef<MapView>(null);
 
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [route, setRoute] = useState<RouteInfo | null>(null);
+  const gpsWatch = useRef<{ remove: () => void } | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(user?.isOnline || false);
   const [phase, setPhase] = useState<DriverPhase>('dashboard');
@@ -143,7 +146,34 @@ function DriverScreenInner() {
 
     const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     setLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+
+    // Keep following the phone's GPS while the app is open, so riders see the driver move.
+    // (Foreground only: there is no tracking while the app is closed or the screen is off.)
+    gpsWatch.current?.remove();
+    gpsWatch.current = await Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 15 },
+      (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    );
   };
+
+  useEffect(() => () => { gpsWatch.current?.remove(); }, []);
+
+  // The road to the rider (before pickup) or to the drop-off (during the trip). Mappls builds only.
+  // Requested once per leg, and again only after the driver has moved about a kilometre.
+  const legTarget = activeRide ? (phase === 'in_ride' ? activeRide.dropoff : phase === 'navigating' ? activeRide.pickup : null) : null;
+  const legFrom = location ? `${location.lat.toFixed(2)},${location.lng.toFixed(2)}` : '';
+  const legTo = legTarget ? `${legTarget.lat.toFixed(5)},${legTarget.lng.toFixed(5)}` : '';
+  useEffect(() => {
+    if (!MAPPLS_ON || !location || !legTarget) {
+      setRoute(null);
+      return;
+    }
+    let cancelled = false;
+    getRoute(location, legTarget).then((r) => {
+      if (!cancelled) setRoute(r);
+    });
+    return () => { cancelled = true; };
+  }, [legFrom, legTo]);
 
   const updateServerLocation = async () => {
     if (!user?.id || !location) return;
@@ -500,6 +530,8 @@ function DriverScreenInner() {
               </Marker>
             </>
           )}
+
+          {route && route.points.length > 1 && <RouteLine id="leg" coordinates={route.points} />}
 
           {pendingRides.map(ride => (
             <Marker
