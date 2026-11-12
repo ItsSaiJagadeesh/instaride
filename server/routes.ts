@@ -42,6 +42,8 @@ import {
   sosSchema,
   verifyDecisionSchema,
   DOCUMENT_KINDS,
+  RIDER_CANCEL_REASONS,
+  DRIVER_CANCEL_REASONS,
 } from "@shared/schema";
 import type {
   StoredUser,
@@ -91,10 +93,34 @@ function driverEligibility(d: StoredUser, config: PlatformConfig): { ok: boolean
 function sanitizeRide(viewer: StoredUser, ride: Ride): Ride {
   const out: Ride = { ...ride };
   if (viewer.role === "driver") delete out.startOtp; // only the InstaRider sees the start OTP
+  if (viewer.role !== "admin") delete out.declinedBy; // who rejected a request is nobody else's business
+  if (viewer.role !== "admin") delete out.cancelLog;
   if (viewer.role !== "admin" && out.review) {
     out.review = { rating: out.review.rating, createdAt: out.review.createdAt };
   }
   return out;
+}
+
+/**
+ * The 4-digit code the rider tells the driver to start the trip.
+ * RIDE_CODE_MODE=phone_last4 (the default): the last 4 digits of the rider's mobile number, easy for the rider to remember.
+ * RIDE_CODE_MODE=random: a new random code for every ride (harder to guess, because it changes each time).
+ */
+async function makeStartCode(riderId: string): Promise<string> {
+  if ((process.env.RIDE_CODE_MODE || "phone_last4").toLowerCase() !== "random") {
+    const rider = await storage.getUser(riderId);
+    const digits = (rider?.phone || "").replace(/\D/g, "");
+    if (digits.length >= 4) return digits.slice(-4);
+  }
+  return String(randomInt(1000, 10000));
+}
+
+/** Only the offered reasons are stored. A missing reason stays empty, an invented one becomes "Other". */
+function cleanCancelReason(role: "rider" | "driver", raw: unknown): string | undefined {
+  const text = typeof raw === "string" ? raw.trim().slice(0, 80) : "";
+  if (!text) return undefined;
+  const offered: readonly string[] = role === "driver" ? DRIVER_CANCEL_REASONS : RIDER_CANCEL_REASONS;
+  return offered.includes(text) ? text : "Other";
 }
 
 function canSeeRide(viewer: StoredUser, ride: Ride) {
@@ -449,6 +475,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const active = await storage.getActiveRides();
     const list = active
       .filter((r) => r.status === "requested" && r.vehicleType === driver.vehicle!.type)
+      .filter((r) => !(r.declinedBy || []).includes(driver.id))
       .filter(
         (r) => haversineKm(r.pickup.lat, r.pickup.lng, driver.currentLocation!.lat, driver.currentLocation!.lng) <= 10,
       )
@@ -497,6 +524,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json(sanitizeRide(req.user!, ride));
   });
 
+  // The driver rejects a request (or lets the 30-second timer run out). It disappears for this driver only.
+  app.put("/api/rides/:id/decline", auth, requireRole("driver"), async (req, res) => {
+    const driver = req.user!;
+    const rideId = req.params.id as string;
+    if (!(await storage.acquireLock("accept:" + rideId, 5000))) {
+      return res.status(409).json({ message: "Please try again" });
+    }
+    try {
+      const ride = await storage.getRide(rideId);
+      if (!ride) return res.status(404).json({ message: "Ride not found" });
+      // Already taken or cancelled: there is nothing left to hide, so this is not an error.
+      if (ride.status !== "requested") return res.json({ ok: true });
+      const declined = ride.declinedBy || [];
+      if (!declined.includes(driver.id)) await storage.updateRide(rideId, { declinedBy: [...declined, driver.id] });
+      return res.json({ ok: true });
+    } finally {
+      await storage.releaseLock("accept:" + rideId);
+    }
+  });
+
   app.put("/api/rides/:id/accept", auth, requireRole("driver"), async (req, res) => {
     const driver = req.user!;
     const config = await storage.getConfig();
@@ -511,6 +558,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ride = await storage.getRide(rideId);
       if (!ride) return res.status(404).json({ message: "Ride not found" });
       if (ride.status !== "requested") return res.status(409).json({ message: "Ride is no longer available" });
+      if ((ride.declinedBy || []).includes(driver.id)) {
+        return res.status(403).json({ message: "You rejected or cancelled this ride" });
+      }
       if (ride.vehicleType !== driver.vehicle?.type) {
         return res.status(403).json({ message: "This ride needs a different vehicle type" });
       }
@@ -525,7 +575,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         driverRating: driver.rating,
         status: "accepted",
         acceptedAt: new Date().toISOString(),
-        startOtp: String(randomInt(1000, 10000)),
+        startOtp: await makeStartCode(ride.riderId),
       });
       await storage.createEvent({
         type: "ride_accepted",
@@ -571,7 +621,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (isDriver && !isRider) {
         // Driver backs out: the ride goes back to searching so the rider does not start over.
+        const why = cleanCancelReason("driver", req.body?.reason);
         const reopened = await storage.updateRide(ride.id, {
+          declinedBy: [...(ride.declinedBy || []), user.id],
+          cancelLog: [...(ride.cancelLog || []), { by: "driver", reason: why, at: new Date().toISOString() }],
           status: "requested",
           driverId: undefined,
           driverName: undefined,
@@ -585,15 +638,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: "ride_cancelled",
           rideId: ride.id,
           userId: ride.riderId,
-          data: { by: "driver", searchingAgain: true },
+          data: { by: "driver", searchingAgain: true, reason: cleanCancelReason("driver", req.body?.reason) },
           read: false,
         });
         return res.json(sanitizeRide(user, reopened!));
       }
+      const riderWhy = cleanCancelReason("rider", req.body?.reason);
+      const nowIso = new Date().toISOString();
       const updated = await storage.updateRide(ride.id, {
         status: "cancelled",
         cancelledBy: "rider",
-        completedAt: new Date().toISOString(),
+        cancelReason: riderWhy,
+        cancelledAt: nowIso,
+        cancelLog: [...(ride.cancelLog || []), { by: "rider", reason: riderWhy, at: nowIso }],
+        completedAt: nowIso,
       });
       if (ride.driverId) {
         await storage.createEvent({

@@ -16,6 +16,10 @@ import { roleAllowed } from '@/lib/variant';
 import Animated, { SlideInDown, FadeIn, FadeInUp, FadeInDown } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import type { Ride } from '@shared/schema';
+import { DRIVER_CANCEL_REASONS } from '@shared/schema';
+
+// A request that is not answered within this time is rejected for this driver (the next driver gets it).
+const REQUEST_SECONDS = 30;
 import AppModal, { useAppModal } from '@/components/AppModal';
 import DriverVerification from '@/components/DriverVerification';
 import { formatINR, formatDate, daysUntil, VEHICLE_LABELS } from '@/lib/format';
@@ -208,9 +212,36 @@ function DriverScreenInner() {
     try {
       const res = await apiRequest('GET', '/api/rides/available');
       const data = await res.json();
-      setPendingRides(Array.isArray(data) ? data : []);
+      setPendingRides(Array.isArray(data) ? data.filter((r: Ride) => !hiddenRides.current.has(r.id)) : []);
     } catch {}
   };
+
+  // ---- Reject a request, and the countdown on it
+  const hiddenRides = useRef<Set<string>>(new Set());
+  const autoRejected = useRef<string | null>(null);
+  const [requestLeft, setRequestLeft] = useState(REQUEST_SECONDS);
+  const topRideId = phase === 'online' ? pendingRides[0]?.id : undefined;
+
+  const rejectRide = async (rideId: string) => {
+    hiddenRides.current.add(rideId);
+    setPendingRides((list) => list.filter((r) => r.id !== rideId)); // gone at once, the next request (if any) shows
+    try { await apiRequest('PUT', `/api/rides/${rideId}/decline`); } catch {}
+    fetchPendingRides();
+  };
+
+  useEffect(() => {
+    if (!topRideId) return;
+    setRequestLeft(REQUEST_SECONDS);
+    const t = setInterval(() => setRequestLeft((s) => s - 1), 1000);
+    return () => clearInterval(t);
+  }, [topRideId]);
+
+  useEffect(() => {
+    if (topRideId && requestLeft <= 0 && autoRejected.current !== topRideId) {
+      autoRejected.current = topRideId;
+      void rejectRide(topRideId);
+    }
+  }, [requestLeft, topRideId]);
 
   const checkActiveRide = async () => {
     if (!user?.id) return;
@@ -261,6 +292,32 @@ function DriverScreenInner() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Backing out after accepting. The ride goes back to searching for another driver, and this driver is not offered it again.
+  const doDriverCancel = async (reason: string) => {
+    if (!activeRide?.id) return;
+    setLoading(true);
+    try {
+      await apiRequest('PUT', `/api/rides/${activeRide.id}/status`, { status: 'cancelled', reason });
+      setActiveRide(null);
+      setOtp('');
+      setPhase(isOnline ? 'online' : 'dashboard');
+      fetchPendingRides();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    } catch (e: any) {
+      showAlert('Cannot cancel', e.message || 'Please try again');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDriverCancel = () => {
+    showActionSheet(
+      'Why are you cancelling?',
+      DRIVER_CANCEL_REASONS.map((label) => ({ label, onPress: () => doDriverCancel(label) })),
+      'Keep the ride',
+    );
   };
 
   const updateRideStatus = async (status: string, startOtp?: string) => {
@@ -596,20 +653,33 @@ function DriverScreenInner() {
                   </View>
                 </View>
               )}
-              <Pressable
-                style={({ pressed }) => [styles.acceptBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
-                onPress={() => acceptRide(ride.id)}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator size="small" color={Colors.secondary} />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark" size={20} color={Colors.secondary} />
-                    <Text style={styles.acceptBtnText}>Accept Ride</Text>
-                  </>
-                )}
-              </Pressable>
+              <Text style={styles.countdownText}>Respond within {Math.max(requestLeft, 0)}s</Text>
+              <View style={styles.requestActions}>
+                <Pressable
+                  style={({ pressed }) => [styles.rejectBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+                  onPress={() => rejectRide(ride.id)}
+                  disabled={loading}
+                  accessibilityLabel="Reject this ride request"
+                >
+                  <Ionicons name="close" size={20} color={Colors.error} />
+                  <Text style={styles.rejectBtnText}>Reject</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.acceptBtn, { flex: 2 }, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+                  onPress={() => acceptRide(ride.id)}
+                  disabled={loading}
+                  accessibilityLabel="Accept this ride request"
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color={Colors.secondary} />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark" size={20} color={Colors.secondary} />
+                      <Text style={styles.acceptBtnText}>Accept Ride</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
             </View>
           ))}
         </Animated.View>
@@ -652,6 +722,14 @@ function DriverScreenInner() {
               <Text style={styles.arrivedBtnText}>I've Arrived</Text>
             </Pressable>
           </View>
+          <Pressable
+            style={({ pressed }) => [styles.driverCancelBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+            onPress={handleDriverCancel}
+            disabled={loading}
+            accessibilityLabel="Cancel this ride"
+          >
+            <Text style={styles.driverCancelText}>Cancel this ride</Text>
+          </Pressable>
         </Animated.View>
       )}
 
@@ -682,6 +760,14 @@ function DriverScreenInner() {
           >
             <Ionicons name="car" size={20} color={Colors.secondary} />
             <Text style={styles.startRideBtnText}>Start Ride</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.driverCancelBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+            onPress={handleDriverCancel}
+            disabled={loading}
+            accessibilityLabel="Cancel this ride"
+          >
+            <Text style={styles.driverCancelText}>Cancel this ride</Text>
           </Pressable>
         </Animated.View>
       )}
@@ -919,6 +1005,17 @@ const styles = StyleSheet.create({
   requestDistance: {
     fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.text,
   },
+  requestActions: { flexDirection: 'row', gap: 10 },
+  countdownText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textLight, textAlign: 'center', marginBottom: 10 },
+  rejectBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 16, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.error,
+  },
+  rejectBtnText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.error },
+  driverCancelBtn: {
+    backgroundColor: 'rgba(255, 59, 48, 0.1)', paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginTop: 10,
+  },
+  driverCancelText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.error },
   acceptBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: Colors.primary, paddingVertical: 16, borderRadius: 14,

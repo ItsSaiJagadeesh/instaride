@@ -36,7 +36,7 @@ settings file, opens only ports 22, 80 and 443, starts everything and waits unti
 **4. Open the console and watch the meter.** `https://your-domain/console/` → sign in → **Go-live meter**. Red items need fixing now,
 amber items need a look, and the grey "only a person can do these" items you tick yourself when they are really done.
 
-**5. SMS.** Create the SMS account (Twilio is built in), finish DLT registration, then put these in `deploy/.env` on the server and run
+**5. SMS.** Create the SMS account (Twilio is built in) and finish DLT registration. The easy way: on the server run `cd ~/instaride/deploy && sudo bash set-twilio.sh`. It asks for the details privately, can send one test text to your own phone, and restarts the app. A Twilio **trial** account can only text numbers you have verified in the Twilio console, and India needs DLT for delivery. Or do it by hand: put these in `deploy/.env` on the server and run
 `docker compose up -d` from the `deploy` folder:
 ```
 SMS_PROVIDER=twilio

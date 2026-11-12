@@ -18,6 +18,7 @@ import { roleAllowed } from '@/lib/variant';
 import Animated, { FadeInDown, FadeInUp, SlideInDown, FadeIn } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import type { Ride, User, VehicleType } from '@shared/schema';
+import { RIDER_CANCEL_REASONS } from '@shared/schema';
 
 const { width, height } = Dimensions.get('window');
 const ASPECT_RATIO = width / height;
@@ -479,10 +480,10 @@ function RiderScreenInner() {
     }
   };
 
-  const doCancelRide = async () => {
+  const doCancelRide = async (reason?: string) => {
     if (!activeRide?.id) return;
     try {
-      await apiRequest('PUT', `/api/rides/${activeRide.id}/status`, { status: 'cancelled' });
+      await apiRequest('PUT', `/api/rides/${activeRide.id}/status`, { status: 'cancelled', reason });
       setActiveRide(null);
       setPhase('idle');
       setDropoffCoord(null);
@@ -494,6 +495,15 @@ function RiderScreenInner() {
     }
   };
 
+  // Asks why, then cancels. Closing the list keeps the ride.
+  const askReasonAndCancel = () => {
+    showActionSheet(
+      'Why are you cancelling?',
+      RIDER_CANCEL_REASONS.map((label) => ({ label, onPress: () => doCancelRide(label) })),
+      'Keep the ride',
+    );
+  };
+
   const handleCancelRide = () => {
     if (!activeRide?.id) return;
     const currentPhase = phaseRef.current;
@@ -503,11 +513,11 @@ function RiderScreenInner() {
         'Your driver is already on the way. Please cancel only if you really need to. You cannot cancel once the trip has started.',
         [
           { label: 'Keep Ride', onPress: () => {} },
-          { label: 'Cancel Anyway', destructive: true, onPress: doCancelRide },
+          { label: 'Cancel Anyway', destructive: true, onPress: askReasonAndCancel },
         ]
       );
     } else {
-      doCancelRide();
+      askReasonAndCancel();
     }
   };
 

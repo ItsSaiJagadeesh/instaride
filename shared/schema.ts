@@ -114,6 +114,24 @@ export interface PlatformConfig {
   sourceCodeUrl?: string; // GPL: where the source code can be obtained
 }
 
+/** The reasons offered when cancelling. The server accepts only these (anything else is stored as "Other"). */
+export const RIDER_CANCEL_REASONS = [
+  'Booked by mistake',
+  'Driver is taking too long',
+  'Changed my plans',
+  'Wrong pickup or drop',
+  'Found another ride',
+  'Other',
+] as const;
+export const DRIVER_CANCEL_REASONS = [
+  'Rider is not reachable',
+  'Rider asked me to cancel',
+  'Wrong pickup location',
+  'Vehicle problem',
+  'Emergency',
+  'Other',
+] as const;
+
 export type RideStatus =
   | 'requested'
   | 'accepted'
@@ -150,6 +168,12 @@ export interface Ride {
   startedAt?: string;
   completedAt?: string;
   cancelledBy?: 'rider' | 'driver' | 'admin';
+  cancelReason?: string; // why the rider cancelled (one of RIDER_CANCEL_REASONS)
+  cancelledAt?: string;
+  /** Drivers who rejected, let the request time out, or backed out. Never sent to riders or other drivers. */
+  declinedBy?: string[];
+  /** Every time someone backed out of this booking, with the reason. For the admin. */
+  cancelLog?: Array<{ by: 'rider' | 'driver'; reason?: string; at: string }>;
   riderName?: string;
   driverName?: string;
   driverVehicle?: VehicleInfo;

@@ -21,6 +21,8 @@ interface AppModalProps {
   message?: string;
   actions: ModalAction[];
   type?: 'actionsheet' | 'alert' | 'confirm';
+  /** Text on the button that closes an action sheet without choosing (default "Cancel"). */
+  dismissLabel?: string;
 }
 
 function AnimatedAlert({ visible, onClose, title, message, actions }: Omit<AppModalProps, 'type'>) {
@@ -81,7 +83,7 @@ function AnimatedAlert({ visible, onClose, title, message, actions }: Omit<AppMo
   );
 }
 
-function AnimatedSheet({ visible, onClose, title, actions }: Omit<AppModalProps, 'type'>) {
+function AnimatedSheet({ visible, onClose, title, actions, dismissLabel }: Omit<AppModalProps, 'type'>) {
   const overlayOpacity = useRef(new RNAnimated.Value(0)).current;
   const translateY = useRef(new RNAnimated.Value(300)).current;
 
@@ -142,7 +144,7 @@ function AnimatedSheet({ visible, onClose, title, actions }: Omit<AppModalProps,
             ))}
           </View>
           <Pressable style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]} onPress={() => handleClose()}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{dismissLabel || 'Cancel'}</Text>
           </Pressable>
         </RNAnimated.View>
       </RNAnimated.View>
@@ -167,6 +169,7 @@ export function useAppModal() {
     message?: string;
     actions: ModalAction[];
     type: 'actionsheet' | 'alert' | 'confirm';
+    dismissLabel?: string;
   }>({ visible: false, actions: [], type: 'alert' });
 
   const showAlert = (title: string, message: string, actions?: ModalAction[]) => {
@@ -192,8 +195,8 @@ export function useAppModal() {
     });
   };
 
-  const showActionSheet = (title: string, actions: ModalAction[]) => {
-    setModalState({ visible: true, title, actions, type: 'actionsheet' });
+  const showActionSheet = (title: string, actions: ModalAction[], dismissLabel?: string) => {
+    setModalState({ visible: true, title, actions, type: 'actionsheet', dismissLabel });
   };
 
   const closeModal = () => setModalState(prev => ({ ...prev, visible: false }));
@@ -205,6 +208,7 @@ export function useAppModal() {
     message: modalState.message,
     actions: modalState.actions,
     type: modalState.type,
+    dismissLabel: modalState.dismissLabel,
   };
 
   return { showAlert, showConfirm, showActionSheet, modalProps };

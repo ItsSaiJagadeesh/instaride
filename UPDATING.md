@@ -29,3 +29,16 @@ To run behind a proxy or in Docker the server now understands `TRUST_PROXY=1`; o
 New dependency: run `npm install` once after copying the files. New files: `plugins/with-mappls.js`, `react-native.config.js`, `lib/places.ts`,
 `lib/places-core.ts`, `scripts/make-mappls-secret.ps1`, `scripts/places-core-test.ts`. Nothing was removed. The driver app now follows the phone's GPS while
 it is open, so riders see the driver move. Builds without the Mappls files still work and show the map placeholder.
+
+## Update: reject a request, cancel with a reason
+
+Drivers can now **Reject** a ride request (with a 30-second countdown; an unanswered request is rejected for that driver) and **cancel after accepting**
+(the ride goes back to searching and that driver is not offered it again). Riders and drivers pick a **reason** when cancelling; the reasons are saved
+and the admin can see them (`cancelLog`, `declinedBy` on a ride; riders and other drivers never see who rejected). New route: `PUT /api/rides/:id/decline`.
+No data migration is needed: the new fields are optional, and existing rides keep working.
+
+## Update: Twilio script and the ride start code
+
+`deploy/set-twilio.sh` connects Twilio on a running server (run `sudo bash deploy/set-twilio.sh`; it asks privately, so the Auth Token is never shown or pasted anywhere else).
+The ride start code is now the **last 4 digits of the rider's mobile number** (`RIDE_CODE_MODE=phone_last4`, the default). Set `RIDE_CODE_MODE=random` in `deploy/.env`
+for a new random code on every ride, which is harder to guess because it changes each time. After editing `.env` run `docker compose up -d --force-recreate app`.
