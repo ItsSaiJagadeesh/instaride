@@ -17,6 +17,8 @@ if (existsSync(".env")) process.loadEnvFile(".env");
 
 const env = { ...process.env };
 env.EXPO_PUBLIC_DOMAIN = env.EXPO_PUBLIC_DOMAIN || "localhost:5000";
+// Expo Go carries its own Google Maps key, so the real map works there.
+if (env.EXPO_PUBLIC_DEMO !== "1") env.EXPO_PUBLIC_MAPS = env.EXPO_PUBLIC_MAPS || "native";
 if (variant !== "all") {
   env.APP_VARIANT = variant;
   env.EXPO_PUBLIC_APP_VARIANT = variant;

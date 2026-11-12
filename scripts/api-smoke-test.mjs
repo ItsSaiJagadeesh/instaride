@@ -378,7 +378,7 @@ async function approve(adminToken, driver) {
   check("development mode and plain http are only warnings here", by("prod-mode").status === "warn" && by("https").status === "warn");
   check("unfinished legal pages are flagged with how many placeholders are left", ["legal-privacy", "legal-terms", "legal-delete-account"].every((id) => by(id).status === "warn" && /\d+ \[PLACEHOLDER\]/.test(by(id).detail)), JSON.stringify(by("legal-privacy")));
   check("placeholder fares and default service area are flagged", by("rates").status === "warn" && by("service-area").status === "warn");
-  check("all manual steps start as not done", checks.filter((c) => c.status === "manual").length === 11 && checks.filter((c) => c.status === "manual").every((c) => c.done === false));
+  check("all manual steps start as not done", checks.filter((c) => c.status === "manual").length === 12 && checks.filter((c) => c.status === "manual").every((c) => c.done === false));
   check("a rider cannot tick a manual step", (await call("PUT", "/api/admin/readiness/manual/dlt", { token: RT, body: { done: true } })).status === 403);
   check("an unknown step is refused", (await call("PUT", "/api/admin/readiness/manual/not-a-step", { token: AT, body: { done: true } })).status === 404);
   check("the Super Admin can tick a manual step", (await call("PUT", "/api/admin/readiness/manual/dlt", { token: AT, body: { done: true } })).status === 200);

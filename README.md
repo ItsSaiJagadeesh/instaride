@@ -19,15 +19,15 @@ See **PLAY_STORE.md** for building the Android file and publishing, **GO_LIVE.md
 
 ## Status: prototype
 
-Tested: the API (141 checks, including sign-in codes, expiry, wrong tries and cooldowns), the SMS sender against a fake
-of Twilio (15 checks), the Super Admin console (34 UI checks) and the app in a real desktop browser (15 end-to-end checks:
-both sign-ups, both sign-ins, booking, driver accept, share trip, SOS, history, safety, deletion). The code is type-checked
-and the Android project generates with the right permissions.
+This is a working prototype, not a finished service. Automated tests cover the API (159 checks: sign-in codes, permissions,
+uploads, verification, rides, fees, account, SOS, sharing, the go-live meter), sending SMS through a fake Twilio (15), the
+Super Admin console (40 UI checks), proxy handling (6), and the app in a real desktop browser (15 end-to-end checks, plus 13
+for the server-free demo). The server scripts, Dockerfile, workflows and config were checked with shellcheck, hadolint,
+actionlint, Docker Compose and Caddy.
 
-**Not tested:** the app on a real phone (camera, GPS, share sheet, SMS compose), real SMS delivery, the real
-OpenStreetMap search, load, and independent security review. No APK or Play Store file has been built (that needs your
-Expo account). Do not take real riders, documents or money through it until a developer has reviewed it and you have done a
-field test. Read "Before going live" below and PLAY_STORE.md.
+Not yet tested: the app on a real phone (camera, GPS, share sheet), real SMS delivery, a real Docker build and certificate,
+and a real Android build. See "What has and has not been tested" in **GO_LIVE.md**. Do not take real riders, documents or money
+through it until a developer has reviewed it and you have done a field test.
 
 ## Roles
 
@@ -45,9 +45,9 @@ You can still build a rider-only or driver-only app with `APP_VARIANT` (see `app
 **InstaRider app** (bottom tabs: Home, My rides, Profile)
 - Home: map, "Where to?", address search (press search; results come from our server), tap-on-map, saved and recent places as one-tap chips, fare for each vehicle type, 4-digit start code, driver card, **Share trip** and **SOS** during a ride, cancel before the trip starts, rate the driver.
 - My rides: history with status, date and fare; tap a ride for the fare breakdown and vehicle number.
-- Profile: Favourite places, Safety (emergency contact, tips, call 112), Notifications, Payment (cash for now), Help (FAQ + support contact), Settings (edit profile, change password, log out, delete account), About (privacy policy, terms, open-source licence).
+- Profile: Favourite places, Safety (emergency contact, tips, call 112), Notifications, Payment (cash for now), Help (FAQ + support contact), Settings (edit profile, log out, delete account), About (privacy policy, terms, open-source licence).
 
-**InstaDriver app:** verification, go online, rides with the start code, earnings and fee ledger, insurance renewal, **SOS** during a ride, and the same account pages (My rides, Notifications, Safety, Help, Settings) from the account menu.
+**Driver side (same app):** verification, go online, rides with the start code, earnings and fee ledger, insurance renewal, **SOS** during a ride, and the same account pages (My rides, Notifications, Safety, Help, Settings) from the account menu.
 
 **Super Admin console** also shows **SOS alerts** (with rider and driver phone numbers and a "handled" button) and has fields for the support phone, support email and source-code link.
 
@@ -59,7 +59,7 @@ You can still build a rider-only or driver-only app with `APP_VARIANT` (see `app
 
 ## How driver verification works
 
-1. Driver signs up with phone, password, vehicle type and number.
+1. Driver signs up with a code sent to their phone, then enters their name, vehicle type and number.
 2. Driver takes 9 photos in the app and submits them.
 3. In the **web console → Verification** you see the photos side by side (click a photo to enlarge), look
    the vehicle number up on VAHAN (link opens the site), tick the box, enter insurance and fitness expiry
@@ -107,19 +107,28 @@ in any desktop browser. Do not expose the console over plain http outside your o
 
 ## Building the Android app
 
-Easiest: GitHub builds it for you with one click (see **GO_LIVE.md**, step 6). Or with Expo's cloud build:
+**Easiest: GitHub builds it for you.** In your repository open Actions, then *Build Android app*, then *Run workflow*. Choose
+`demo` (the server-free demo) or `live` (your server address). Download the result from the run's Artifacts box. Details in
+**GO_LIVE.md**, steps 6 and 7.
 
-See **PLAY_STORE.md** for the full guide. In short, with a free Expo account and your https server address in `eas.json`:
+**Or with Expo's cloud build** (free Expo account, `npx eas-cli login`):
 
 ```bash
-npx eas-cli login
 npx eas-cli build --platform android --profile app-preview      # APK to test on a phone
 npx eas-cli build --platform android --profile app-production   # .aab to upload to Google Play
 ```
 
 The production build refuses to run if the server address is a placeholder or a local address, or if plain http is on.
+The Android map needs a Google Maps key (`GOOGLE_MAPS_API_KEY`, see **GO_LIVE.md** step 6b); builds without one show a map placeholder instead.
 The app asks for location and (for drivers) the camera, and removes microphone, storage and "draw over apps" permissions.
-The package ID `in.instaride.app` cannot be changed after the first Play Store upload: change it in `app.json` first if you want another.
+The package ID `in.instaride.app` cannot be changed after the first Play Store upload: change it in `app.json` first if you
+want another. See **PLAY_STORE.md** for the Play Console side.
+
+## Running on a server
+
+`deploy/` has everything for one server: the app, Redis, automatic https (Caddy) and daily backups. On a fresh Ubuntu server run
+`sudo bash deploy/setup-server.sh`. Once it is running, the **Go-live meter** tab in the console shows what is connected and what is
+missing. `GET /api/health` answers whether the server and its database are up. See **GO_LIVE.md**.
 
 ## Sign-in codes (OTP)
 
@@ -168,20 +177,21 @@ shown is the fare charged (no GPS metering yet).
 - [ ] Android release build with background location if you want tracking while the screen is off (not built)
 - [ ] Confirm the VAHAN link in `admin-web/app.js` is current
 - [ ] Put the console behind https and, if you can, restrict `/console` to known IP addresses
-- [ ] The old in-app admin screen (`app/admin.tsx`) only runs in the development build; delete it if you do not need it
 
 ## Project layout
 
 ```
 admin-web/      Super Admin web console (plain HTML/CSS/JS, served at /console)
-app/            Expo Router screens (welcome, login, register, rider, driver, admin)
+app/            Expo Router screens (welcome, sign-in/sign-up, rider tabs, driver, account pages)
 app.config.js   Builds the app (single InstaRide app by default) and runs build safety checks
 eas.json        Android build profiles
 components/     Shared UI + DriverVerification
 lib/            API client, auth context, token store, formatting, photo upload
 server/         Express API (routes, auth, fare, storage)
 shared/         Types and validation shared by app and server
-scripts/        API, SMS-provider and web console UI tests, fake services
+deploy/         Server pack: Docker Compose, Caddy (https), backups, restore, setup script
+.github/        Workflows: one-click Android build, and checks on every push
+scripts/        API, SMS-provider, proxy and web console UI tests, fake services, key helper
 ```
 
 ## Licence

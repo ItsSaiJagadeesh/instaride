@@ -52,6 +52,17 @@ and remove them after approval.
 - `kind = live`, `server_address = api.yourdomain.in`: the real app pointing at your server.
 When it finishes, open the run and download **instaride-android** from the Artifacts box. Install `instaride.apk` on a phone.
 
+**6b. A map key for the Android app.** The phone's map needs a Google Maps key built into the app. Without one the app is built with a clearly
+labelled map placeholder (everything else still works), so the demo and early test builds need nothing. For the real app:
+1. In the Google Cloud Console create a project, then enable **Maps SDK for Android** (it asks for a billing account; Google gives a free monthly allowance.
+   Check its current pricing and limits before you rely on it).
+2. Create an **API key**. Under *Application restrictions* choose **Android apps** and add your package name `in.instaride.app` with the **SHA-1** of the
+   key that signs the app. Add one entry per signing key: your upload key (`keytool -list -v -keystore instaride-upload.jks`) and, once the app is on
+   Google Play, Google's app-signing certificate (Play Console, Setup, App signing). Under *API restrictions* allow only Maps SDK for Android.
+3. Add the key as a GitHub secret named `GOOGLE_MAPS_API_KEY`. A live build then includes the real map. The key ends up inside the app file, which is
+   normal for map keys; the restrictions above are what stop others from using it.
+Tick the matching step in the meter when done. The Google Play build refuses to run without this secret.
+
 **7. Signing key, once, for Google Play.** Run `bash scripts/make-upload-key.sh` (or `scripts\make-upload-key.ps1` on Windows; needs a JDK).
 Paste the four values from `github-secrets.txt` into the repository's *Settings → Secrets and variables → Actions*, delete that file,
 and keep `instaride-upload.jks` somewhere safe and private. Then run the workflow with `kind = live` and **play_bundle** ticked to get

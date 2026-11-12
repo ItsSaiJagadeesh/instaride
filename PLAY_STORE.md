@@ -51,6 +51,8 @@ npx eas-cli build --platform android --profile app-production
 - The app's identity is `in.instaride.app`. **This cannot be changed after the first upload to Google Play.** Change `android.package`
   in `app.json` first if you want a different one.
 
+> **Map key:** the Android app needs a Google Maps key for its map (GO_LIVE.md, step 6b). Without the `GOOGLE_MAPS_API_KEY` secret a build shows a placeholder where the map would be, and the Play build refuses to run.
+
 ## 3. Play Console (what Google asks)
 
 - **Store listing:** name, short and long description, icon (512×512), feature graphic, at least 2 phone screenshots.

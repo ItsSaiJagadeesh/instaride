@@ -5,6 +5,7 @@ The demo runs **entirely inside the app**. It needs no server and no internet, s
 - Sign in as **Rider** or **Driver** with **9182631581** and the code **123456**. Nothing else works.
 - You can open every screen: Home, fares, history, profile, safety, help (and, as a driver, the dashboard, going online and a sample ride request).
 - **Switched off:** booking, accepting a ride, sign-up, deleting the account. The app says so in plain words.
+- On a phone the demo shows a labelled placeholder where the map would be (the real map needs a Google Maps key). Everything else works.
 - All data is sample data and is reset when the app is closed.
 - It is for showing the app. It is **not** the build for Google Play and it contains no real accounts.
 

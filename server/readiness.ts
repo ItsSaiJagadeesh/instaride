@@ -27,6 +27,7 @@ const prodFail = (): Status => (isProd() ? "fail" : "warn");
 /** Steps that nobody can automate: they prove who the owner is, or need a human decision. */
 export const MANUAL_STEPS: { id: string; title: string; fix: string }[] = [
   { id: "domain-owner", title: "The domain name is bought in the owner's own name", fix: "Register it at a registrar with the owner's email and two-step verification. Write down who can log in." },
+  { id: "maps-key", title: "A Google Maps key is created, limited to your app, and saved as the GOOGLE_MAPS_API_KEY secret", fix: "Without it the Android app shows a map placeholder instead of a map. Create the key in Google Cloud (Maps SDK for Android), restrict it to your app's package name and signing certificate, and add it as a GitHub secret. See GO_LIVE.md." },
   { id: "dlt", title: "SMS sender and message template are registered (DLT) and approved", fix: "Your SMS provider guides this. The sign-in message text in .env.example must match the approved template exactly." },
   { id: "sms-funded", title: "The SMS account is out of trial mode and has credit", fix: "Trial accounts only text verified numbers. Add credit and send a code to a number that is not yours." },
   { id: "play-account", title: "Google Play Console account is created and verified", fix: "Needs the one-time fee and identity verification, which can take days." },

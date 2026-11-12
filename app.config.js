@@ -59,7 +59,14 @@ function withVersionCode(config) {
   return { ...config, android: { ...config.android, versionCode: code } };
 }
 
-module.exports = (args) => withVersionCode(build(args));
+// The Google Maps key goes into the Android manifest, only for builds that use the real map (never the demo).
+function withGoogleMaps(config) {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (process.env.EXPO_PUBLIC_MAPS !== 'native' || process.env.EXPO_PUBLIC_DEMO === '1' || !key) return config;
+  return { ...config, android: { ...config.android, config: { ...(config.android && config.android.config), googleMaps: { apiKey: key } } } };
+}
+
+module.exports = (args) => withGoogleMaps(withVersionCode(build(args)));
 
 function build({ config }) {
   checkCloudBuild();
