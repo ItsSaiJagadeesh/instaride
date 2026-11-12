@@ -132,6 +132,7 @@ jobs:
         run: npx expo prebuild --platform android --no-install --clean
 
       - name: Build
+        shell: bash
         env:
           PLAY_BUNDLE: ${{ inputs.play_bundle }}
         run: |
@@ -139,11 +140,14 @@ jobs:
           cd android
           chmod +x gradlew
           tasks=(assembleRelease)
-          if [ "$PLAY_BUNDLE" = "true" ]; then tasks+=(bundleRelease); fi
+          # Test builds are 64-bit phones only (every modern phone), which roughly halves the build time.
+          # The Google Play build also includes 32-bit phones.
+          archs="arm64-v8a"
+          if [ "$PLAY_BUNDLE" = "true" ]; then tasks+=(bundleRelease); archs="arm64-v8a,armeabi-v7a"; fi
           # Expo's default gives Gradle 2 GB, which React Native builds can run out of. GitHub's machines have plenty more.
           ./gradlew "${tasks[@]}" --no-daemon --stacktrace \
             "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g" \
-            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+            "-PreactNativeArchitectures=$archs" 2>&1 | tee "$RUNNER_TEMP/gradle.log"
 
       - name: Sign
         env:
@@ -155,7 +159,29 @@ jobs:
         run: |
           ks="$RUNNER_TEMP/upload.jks"
           if [ -n "$KEYSTORE_B64" ]; then
-            printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
+            # Secrets pasted by hand often carry a stray space or line break. None of the real values contain any, so remove them.
+            KEYSTORE_B64="$(printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]')"
+            KS_PASS="$(printf '%s' "$KS_PASS" | tr -d '[:space:]')"
+            KEY_PASS="$(printf '%s' "$KEY_PASS" | tr -d '[:space:]')"
+            KEY_ALIAS="$(printf '%s' "$KEY_ALIAS" | tr -d '[:space:]')"
+            if ! printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks" 2>/dev/null || [ ! -s "$ks" ]; then
+              echo "::error::ANDROID_KEYSTORE_BASE64 is not a valid key file (it has ${#KEYSTORE_B64} characters; a real one has about 3,500). Copy it again from github-secrets.txt and replace the secret."
+              exit 1
+            fi
+            export KS_PASS KEY_PASS
+            if ! keytool -list -keystore "$ks" -storepass:env KS_PASS > "$RUNNER_TEMP/kt.out" 2> "$RUNNER_TEMP/kt.err"; then
+              if grep -qiE 'password was incorrect|tampered' "$RUNNER_TEMP/kt.out" "$RUNNER_TEMP/kt.err"; then
+                echo "::error::ANDROID_KEYSTORE_PASSWORD does not match your key file. The secret has ${#KS_PASS} characters; the one made by make-upload-key has 24. Copy the value again from github-secrets.txt and replace the secret."
+              else
+                echo "::error::The key file could not be opened: $(head -c 200 "$RUNNER_TEMP/kt.err" | tr '\n' ' ')"
+              fi
+              exit 1
+            fi
+            if ! grep -qiE "^${KEY_ALIAS}," "$RUNNER_TEMP/kt.out"; then
+              aliases="$(grep -E ', (PrivateKeyEntry|trustedCertEntry)' "$RUNNER_TEMP/kt.out" | cut -d, -f1 | tr '\n' ' ')"
+              echo "::error::ANDROID_KEY_ALIAS is '${KEY_ALIAS}' but your key file contains: ${aliases:-nothing}. Replace the secret with that name."
+              exit 1
+            fi
             signing="your own key"
           else
             KS_PASS="$(openssl rand -hex 16)"; KEY_PASS="$KS_PASS"; KEY_ALIAS="temporary"
@@ -174,10 +200,15 @@ jobs:
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
           [ -x "$apksigner" ] || { echo "::error::apksigner was not found on this machine"; exit 1; }
           mkdir -p dist
-          "$apksigner" sign --ks "$ks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
-            --v4-signing-enabled false \
-            --out dist/instaride.apk android/app/build/outputs/apk/release/app-release.apk
-          "$apksigner" verify --print-certs dist/instaride.apk | head -3
+          if ! "$apksigner" sign --ks "$ks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --min-sdk-version 24 --v4-signing-enabled false \
+            --out dist/instaride.apk android/app/build/outputs/apk/release/app-release.apk 2> "$RUNNER_TEMP/apksigner.err"; then
+            echo "::error::Signing the app failed: $(head -c 400 "$RUNNER_TEMP/apksigner.err" | tr '\n' ' ')"
+            exit 1
+          fi
+          "$apksigner" verify --print-certs dist/instaride.apk > "$RUNNER_TEMP/certs.txt" || { echo "::error::The signed app did not verify."; exit 1; }
+          fingerprint="$(grep -i 'certificate SHA-256 digest' "$RUNNER_TEMP/certs.txt" | head -1 | sed 's/.*: *//' | tr 'a-f' 'A-F')"
+          echo "App signing SHA-256: ${fingerprint}"
 
           if [ "$PLAY_BUNDLE" = "true" ]; then
             cp android/app/build/outputs/bundle/release/app-release.aab dist/instaride.aab
@@ -200,6 +231,7 @@ jobs:
             echo "built:         $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "version code:  $ANDROID_VERSION_CODE"
             echo "signed with:   $signing"
+            echo "signing SHA-256: ${fingerprint}"
             echo "map:           ${map_note}"
             (cd dist && sha256sum ./* && stat -c '%s bytes  %n' ./*)
           } > dist/build-info.txt
@@ -211,6 +243,7 @@ jobs:
             echo "Download **instaride-android** from the *Artifacts* box at the bottom of this page."
             echo ""
             echo "- Signed with: ${signing}"
+            echo "- Signing SHA-256: \`${fingerprint}\` (must match the fingerprint registered with Mappls)"
             echo "- Map: ${map_note}"
             echo "- On your phone: open the downloaded \`instaride.apk\`, and allow \"install unknown apps\" if Android asks."
             if [ "$PLAY_BUNDLE" = "true" ]; then echo "- Upload \`instaride.aab\` to the Google Play Console."; fi
