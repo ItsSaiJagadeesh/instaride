@@ -13,6 +13,7 @@ import { useAuth } from '@/lib/auth-context';
 import { apiRequest } from '@/lib/query-client';
 import Colors from '@/constants/colors';
 import { roleAllowed } from '@/lib/variant';
+import RiderContactCard from '@/components/RiderContactCard';
 import Animated, { SlideInDown, FadeIn, FadeInUp, FadeInDown } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import type { Ride } from '@shared/schema';
@@ -704,6 +705,7 @@ function DriverScreenInner() {
             <Text style={styles.cardTitle}>Navigate to Pickup</Text>
           </View>
           <Text style={styles.rideAddress} numberOfLines={2}>{activeRide.pickup.address}</Text>
+          <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
 
           <View style={styles.actionRow}>
             <Pressable
@@ -744,6 +746,7 @@ function DriverScreenInner() {
           <Text style={styles.rideInfo}>
             {activeRide.riderName || 'Rider'} has been notified of your arrival
           </Text>
+          <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
           <TextInput
             style={styles.otpInput}
             placeholder="Rider's 4-digit start code"
@@ -780,6 +783,7 @@ function DriverScreenInner() {
             <View style={[styles.statusIndicator, { backgroundColor: Colors.success }]} />
             <Text style={styles.cardTitle}>Ride in Progress</Text>
           </View>
+          <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
 
           <View style={styles.rideDestination}>
             <Ionicons name="flag" size={18} color={Colors.accent} />

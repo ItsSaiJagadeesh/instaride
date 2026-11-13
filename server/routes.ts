@@ -524,6 +524,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json(sanitizeRide(req.user!, ride));
   });
 
+  /**
+   * The rider's name, mobile number and pickup, for the ONE driver assigned to a live ride.
+   * Everyone else is refused (other drivers, riders, the admin console, anyone signed out), and the assigned driver loses
+   * access the moment the ride is cancelled, handed to another driver, or finished. The greeting is worked out here from the
+   * rider's own saved gender, so the driver never receives the gender itself. Nothing here is written to the logs.
+   */
+  app.get("/api/rides/:id/rider-contact", auth, requireRole("driver"), async (req, res) => {
+    const driver = req.user!;
+    const ride = await storage.getRide(req.params.id as string);
+    if (!ride || ride.driverId !== driver.id) {
+      return res.status(403).json({ message: "These details are only for the driver assigned to this ride." });
+    }
+    if (!["accepted", "arriving", "arrived", "in_progress"].includes(ride.status)) {
+      return res.status(403).json({ message: "Contact details are only available while the ride is active." });
+    }
+    const rider = await storage.getUser(ride.riderId);
+    if (!rider) return res.status(404).json({ message: "Rider not found" });
+    const greeting = rider.gender === "male" ? "Namaste Sir" : rider.gender === "female" ? "Namaste Madam" : "Namaste";
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ name: rider.fullName, phone: rider.phone, pickupAddress: ride.pickup?.address ?? "", greeting });
+  });
+
   // The driver rejects a request (or lets the 30-second timer run out). It disappears for this driver only.
   app.put("/api/rides/:id/decline", auth, requireRole("driver"), async (req, res) => {
     const driver = req.user!;
@@ -964,7 +986,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/me", auth, async (req, res) => {
     try {
       const p = updateProfileSchema.parse(req.body);
-      const updated = await storage.updateUser(req.user!.id, { fullName: p.fullName });
+      const updated = await storage.updateUser(req.user!.id, {
+        fullName: p.fullName,
+        ...(p.gender !== undefined ? { gender: p.gender ?? undefined } : {}), // null clears it
+      });
       return res.json(toSafeUser(updated!));
     } catch (e) {
       return fail(res, e);

@@ -20,29 +20,34 @@ let waitingPhone = '';
 
 const tenDigits = (phone: string) => phone.replace(/\D/g, '').slice(-10);
 
-/** Turns Firebase's technical errors into sentences a person can act on. */
-function friendly(e: any): string {
-  switch (e?.code) {
+/**
+ * Turns Firebase's technical errors into sentences a person can act on. For anything that is not an ordinary
+ * "wrong or old code" the error name is added in brackets, so a failure on a phone can be reported exactly.
+ */
+function friendly(e: any, stage: 'send' | 'check'): string {
+  const code: string = typeof e?.code === 'string' ? e.code : '';
+  const tag = code ? ` [${code}]` : e?.message ? ` [${String(e.message).slice(0, 80)}]` : '';
+  switch (code) {
     case 'auth/invalid-verification-code':
       return 'Wrong code. Please check it and try again.';
     case 'auth/code-expired':
     case 'auth/session-expired':
       return 'This code has expired. Ask for a new one.';
     case 'auth/too-many-requests':
-      return 'Too many tries. Please wait a while and try again.';
+      return 'Too many tries. Please wait a while and try again.' + tag;
     case 'auth/invalid-phone-number':
-      return 'That phone number does not look right.';
+      return 'That phone number does not look right.' + tag;
     case 'auth/network-request-failed':
-      return 'No internet connection. Please check it and try again.';
+      return 'No internet connection. Please check it and try again.' + tag;
     case 'auth/app-not-authorized':
     case 'auth/missing-client-identifier':
     case 'auth/invalid-app-credential':
     case 'auth/operation-not-allowed':
-      return 'Phone sign-in is not fully set up for this app yet. Please tell the InstaRide team.';
+      return 'Phone sign-in is not fully set up for this app yet. Please tell the InstaRide team.' + tag;
     case 'auth/quota-exceeded':
-      return 'We cannot send more codes right now. Please try again later.';
+      return 'We cannot send more codes right now. Please try again later.' + tag;
     default:
-      return 'We could not verify that code. Please try again.';
+      return (stage === 'send' ? 'We could not send the code. Please try again.' : 'We could not check that code. Please try again.') + tag;
   }
 }
 
@@ -61,7 +66,8 @@ export async function requestPhoneProof(path: string, phone: string, body?: obje
     try {
       waiting = await fb.signInWithPhoneNumber(fb.getAuth(), '+91' + waitingPhone);
     } catch (e: any) {
-      throw new Error(friendly(e));
+      console.warn('Firebase could not send the code:', e?.code, e?.message);
+      throw new Error(friendly(e, 'send'));
     }
   }
   return out;
@@ -90,6 +96,7 @@ export async function finishPhoneProof(code: string): Promise<{ otp: string } | 
     waiting = null;
     return { idToken };
   } catch (e: any) {
-    throw new Error(friendly(e));
+    console.warn('Firebase could not check the code:', e?.code, e?.message);
+    throw new Error(friendly(e, 'check'));
   }
 }

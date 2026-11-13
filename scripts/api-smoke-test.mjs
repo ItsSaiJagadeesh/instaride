@@ -213,6 +213,31 @@ async function approve(adminToken, driver) {
   check("rider sees start OTP and driver vehicle", /^\d{4}$/.test(riderView.data.startOtp) && riderView.data.driverVehicle?.number);
   const meRider = await call("GET", "/api/me", { token: RT });
   check("the start code is the last 4 digits of the rider's mobile number", riderView.data.startOtp === String(meRider.data.phone).slice(-4), `${riderView.data.startOtp} vs ${meRider.data.phone}`);
+
+  console.log("Rider contact for the assigned driver");
+  const loser = winner === d1 ? d2 : d1;
+  const contactUrl = `/api/rides/${ride.data.id}/rider-contact`;
+  const c1 = await call("GET", contactUrl, { token: winner.token });
+  check("the driver who accepted sees the rider's name, number and pickup", c1.status === 200 && c1.data.name === meRider.data.fullName && c1.data.phone === meRider.data.phone && !!c1.data.pickupAddress, JSON.stringify(c1.data));
+  check("the greeting is plain Namaste when the rider has not set a gender", c1.data.greeting === "Namaste", JSON.stringify(c1.data));
+  check("the driver never receives the gender itself", !("gender" in c1.data));
+  for (const [g, want] of [["female", "Namaste Madam"], ["male", "Namaste Sir"], ["other", "Namaste"]]) {
+    const set = await call("PUT", "/api/me", { token: RT, body: { fullName: meRider.data.fullName, gender: g } });
+    const r = await call("GET", contactUrl, { token: winner.token });
+    check(`rider gender "${g}" gives the greeting "${want}"`, set.status === 200 && set.data.gender === g && r.data.greeting === want, JSON.stringify([set.data, r.data]));
+  }
+  const cleared = await call("PUT", "/api/me", { token: RT, body: { fullName: meRider.data.fullName, gender: null } });
+  check("clearing the gender goes back to plain Namaste", cleared.status === 200 && cleared.data.gender === undefined && (await call("GET", contactUrl, { token: winner.token })).data.greeting === "Namaste", JSON.stringify(cleared.data));
+  check("an invalid gender is refused", (await call("PUT", "/api/me", { token: RT, body: { fullName: meRider.data.fullName, gender: "robot" } })).status === 400);
+  check("the other driver cannot read the rider's number", (await call("GET", contactUrl, { token: loser.token })).status === 403);
+  check("the rider cannot use this route", (await call("GET", contactUrl, { token: RT })).status === 403);
+  check("the admin cannot use this route", (await call("GET", contactUrl, { token: AT })).status === 403);
+  check("a signed-out visitor cannot", (await call("GET", contactUrl)).status === 401);
+  check("a ride that does not exist gives nothing", (await call("GET", "/api/rides/nope/rider-contact", { token: winner.token })).status === 403);
+  const stored = await fetch(BASE + contactUrl, { headers: { Authorization: "Bearer " + winner.token } });
+  check("the answer is marked do-not-store", (stored.headers.get("cache-control") || "").includes("no-store"));
+  const elsewhere = JSON.stringify([(await call("GET", "/api/rides/available", { token: loser.token })).data, (await call("GET", `/api/rides/${ride.data.id}`, { token: winner.token })).data]);
+  check("the rider's number is not in the ride record or in the request list", !elsewhere.includes(meRider.data.phone));
   const other = await otpSignup("rider", "Other Rider");
   check("another rider cannot read this ride", (await call("GET", `/api/rides/${ride.data.id}`, { token: other.token })).status === 404);
   check("another rider cannot read my ride list", (await call("GET", `/api/rides/rider/${RID}`, { token: other.token })).status === 403);
@@ -222,12 +247,14 @@ async function approve(adminToken, driver) {
   await call("PUT", `/api/rides/${ride.data.id}/status`, { token: winner.token, body: { status: "arrived" } });
   const wrongOtp = await call("PUT", `/api/rides/${ride.data.id}/status`, { token: winner.token, body: { status: "in_progress", otp: "0000" === riderView.data.startOtp ? "1111" : "0000" } });
   check("wrong start code rejected", wrongOtp.status === 400);
+  check("the driver can still reach the rider while the pickup is under way", (await call("GET", contactUrl, { token: winner.token })).status === 200);
   const start = await call("PUT", `/api/rides/${ride.data.id}/status`, { token: winner.token, body: { status: "in_progress", otp: riderView.data.startOtp } });
   check("correct start code starts the trip", start.status === 200 && start.data.status === "in_progress");
   const lateCancel = await call("PUT", `/api/rides/${ride.data.id}/status`, { token: RT, body: { status: "cancelled" } });
   check("cannot cancel after the trip starts", lateCancel.status === 400);
   const done = await call("PUT", `/api/rides/${ride.data.id}/status`, { token: winner.token, body: { status: "completed" } });
   check("trip completes", done.status === 200 && done.data.status === "completed");
+  check("once the trip is finished the driver can no longer read the rider's number", (await call("GET", contactUrl, { token: winner.token })).status === 403);
   const me = await call("GET", "/api/me", { token: winner.token });
   check("driver fee ledger is Rs 5 and earnings are fare - 5", me.data.feesDue === 5 && me.data.totalEarnings === ride.data.fare.totalFare - 5, JSON.stringify(me.data));
   const rev = await call("PUT", `/api/rides/${ride.data.id}/review`, { token: RT, body: { rating: 5, comment: "Good" } });
@@ -265,6 +292,7 @@ async function approve(adminToken, driver) {
   check("rejecting a ride that was already taken changes nothing", rejLate.status === 200 && (await call("GET", `/api/rides/${ride3.data.id}`, { token: RT })).data.status === "accepted");
   const dc3 = await call("PUT", `/api/rides/${ride3.data.id}/status`, { token: d1.token, body: { status: "cancelled", reason: "Vehicle problem" } });
   check("driver cancels with a reason and the ride goes back to searching", dc3.status === 200 && dc3.data.status === "requested" && !dc3.data.driverId, JSON.stringify(dc3.data));
+  check("after backing out, that driver can no longer read the rider's number", (await call("GET", `/api/rides/${ride3.data.id}/rider-contact`, { token: d1.token })).status === 403);
   check("the driver who backed out does not get the same ride again", !(await seenBy(d1)) && (await call("PUT", `/api/rides/${ride3.data.id}/accept`, { token: d1.token })).status === 403);
   const adminSeesRide = await call("GET", `/api/rides/${ride3.data.id}`, { token: AT });
   const backedOut = adminSeesRide.data.cancelLog || [];
@@ -274,6 +302,11 @@ async function approve(adminToken, driver) {
   const ride4 = await call("POST", "/api/rides", { token: RT, body: { vehicleType: "bike", pickup, dropoff: drop } });
   const rc4 = await call("PUT", `/api/rides/${ride4.data.id}/status`, { token: RT, body: { status: "cancelled", reason: "<img src=x onerror=alert(1)>" } });
   check("an invented reason is stored as 'Other', never as typed", rc4.status === 200 && rc4.data.cancelReason === "Other", JSON.stringify(rc4.data));
+  const ride6 = await call("POST", "/api/rides", { token: RT, body: { vehicleType: "bike", pickup, dropoff: drop } });
+  const acc6 = await call("PUT", `/api/rides/${ride6.data.id}/accept`, { token: d1.token });
+  check("a driver accepts another ride and can read the rider's number", acc6.status === 200 && (await call("GET", `/api/rides/${ride6.data.id}/rider-contact`, { token: d1.token })).status === 200, JSON.stringify(acc6.data));
+  await call("PUT", `/api/rides/${ride6.data.id}/status`, { token: RT, body: { status: "cancelled", reason: "Changed my plans" } });
+  check("when the rider cancels, the driver loses access to the number", (await call("GET", `/api/rides/${ride6.data.id}/rider-contact`, { token: d1.token })).status === 403);
   const ride5 = await call("POST", "/api/rides", { token: RT, body: { vehicleType: "bike", pickup, dropoff: drop } });
   const rc5 = await call("PUT", `/api/rides/${ride5.data.id}/status`, { token: RT, body: { status: "cancelled" } });
   check("cancelling without a reason still works", rc5.status === 200 && rc5.data.status === "cancelled" && rc5.data.cancelReason === undefined, JSON.stringify(rc5.data));

@@ -67,6 +67,9 @@ export interface VehicleInfo {
 }
 
 /** Full user record as stored on the server. */
+/** Chosen by the person in Edit profile. Used only to greet a rider properly; never guessed from a name. */
+export type Gender = 'male' | 'female' | 'other';
+
 export interface StoredUser {
   id: string;
   phone: string; // login id
@@ -85,6 +88,7 @@ export interface StoredUser {
   feesDue?: number; // rupees of platform fee the driver has not paid yet
   emergencyContact?: EmergencyContact;
   favourites?: Favourite[];
+  gender?: Gender;
 }
 
 /** What the apps receive: no password hash, no file names. */
@@ -305,7 +309,16 @@ export const configUpdateSchema = z
 
 export const updateProfileSchema = z.object({
   fullName: z.string().trim().min(2).max(80),
+  gender: z.enum(['male', 'female', 'other']).nullable().optional(), // null clears it
 });
+
+/** What the assigned driver may see about the rider of a live ride (from GET /api/rides/:id/rider-contact). */
+export interface RiderContact {
+  name: string;
+  phone: string; // 10 digits
+  pickupAddress: string;
+  greeting: 'Namaste Sir' | 'Namaste Madam' | 'Namaste';
+}
 
 export const emergencyContactSchema = z.object({
   name: z.string().trim().min(2).max(60),

@@ -49,3 +49,11 @@ New dependencies (`@react-native-firebase/app` and `auth`, pinned to **23.8.8**:
 `scripts/firebase-auth-test.mjs`, `deploy/set-firebase.sh`. The server now tells the app, number by number, how to prove it ("mode": "code" or "firebase"). With `FIREBASE_PROJECT_ID`
 set, numbers that are not in `OTP_FIXED` prove themselves with Firebase, and the server checks Google's signed proof itself (signature, project, freshness, phone number, used once).
 Apps built before this update cannot sign in those numbers ("please update the app"). Without `FIREBASE_PROJECT_ID`, nothing changes. Deleting an account is confirmed the same way.
+
+## Update: rider contact for the driver, rider gender
+
+The driver's active-ride screen now shows the rider's name, mobile number and pickup, with **Call** (opens the dialler) and **WhatsApp** (opens a ready-typed message; nothing is sent
+automatically). The greeting follows the rider's own saved gender (Namaste Sir, Namaste Madam, or plain Namaste); riders can set it under Edit profile. The details come from
+`GET /api/rides/:id/rider-contact`, which only the driver assigned to that live ride can use. It is refused for other drivers, riders, the admin console and signed-out users, and stops
+working the moment the ride is cancelled, handed to another driver or finished. The number is not in the ride record or the request list. No database change is needed (gender is optional).
+New files: `components/RiderContactCard.tsx`, `lib/rider-contact-core.ts`, `scripts/rider-contact-test.ts`.
