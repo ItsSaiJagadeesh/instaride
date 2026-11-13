@@ -23,7 +23,7 @@ import {
 } from "./auth";
 import { haversineKm, quoteFare } from "./fare";
 import { searchPlaces, reversePlace } from "./geocode";
-import { sendOtp, checkOtp, OtpError } from "./otp";
+import { startPhoneProof, verifyPhoneProof, OtpError } from "./otp";
 import { SmsError } from "./sms";
 import { buildReadiness, MANUAL_STEPS } from "./readiness";
 import {
@@ -154,8 +154,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: Request, res: Response) => {
       try {
         const p = otpRequestSchema.parse(req.body);
-        const out = await sendOtp(p.phone);
-        return res.json({ sent: true, ...out });
+        const out = await startPhoneProof(p.phone);
+        return res.json({ sent: out.mode === "code", ...out }); // mode "firebase": Firebase sends the text, the server does not
       } catch (e) {
         return codeErrors(res, e);
       }
@@ -168,7 +168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: Request, res: Response) => {
       try {
         const p = otpVerifySchema.parse(req.body);
-        await checkOtp(p.phone, p.otp);
+        await verifyPhoneProof(p.phone, { otp: p.otp, idToken: p.idToken });
         const user = await storage.getUserByPhone(p.phone, p.role);
         if (user) {
           if (user.suspended) return res.status(403).json({ message: "This account is suspended" });
@@ -1014,7 +1014,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (rides.some((r) => (ACTIVE as readonly string[]).includes(r.status))) {
         return res.status(409).json({ message: "Finish or cancel your current ride before deleting your account" });
       }
-      await checkOtp(user.phone, p.otp);
+      await verifyPhoneProof(user.phone, { otp: p.otp, idToken: p.idToken });
       // Keep the trip records (needed for fee and dispute history) but remove the person's name from them.
       for (const r of rides) {
         await storage.updateRide(
@@ -1047,7 +1047,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req, res) => {
       try {
         if (req.user!.role === "admin") return res.status(403).json({ message: "Not available for the Super Admin account" });
-        return res.json({ sent: true, ...(await sendOtp(req.user!.phone)) });
+        const out = await startPhoneProof(req.user!.phone);
+        return res.json({ sent: out.mode === "code", ...out });
       } catch (e) {
         return codeErrors(res, e);
       }

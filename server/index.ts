@@ -5,6 +5,7 @@ import { registerRoutes } from "./routes";
 import { storage } from "./storage";
 import { assertSecurityConfig, hashPassword } from "./auth";
 import { assertOtpConfig } from "./otp";
+import { assertFirebaseConfig } from "./firebase";
 import { describeSmsSetup } from "./sms";
 import * as fs from "fs";
 import * as path from "path";
@@ -278,6 +279,7 @@ function setupErrorHandler(app: express.Application) {
 (async () => {
   assertSecurityConfig();
   assertOtpConfig();
+  assertFirebaseConfig();
   console.log(describeSmsSetup());
   await storage.initialize(hashPassword);
 

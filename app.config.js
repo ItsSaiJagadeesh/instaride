@@ -72,7 +72,21 @@ function withMappls(config) {
   return { ...config, plugins: [...(config.plugins || []), './plugins/with-mappls'] };
 }
 
-module.exports = (args) => withMappls(withGoogleMaps(withVersionCode(build(args))));
+// Firebase (phone sign-in for real users): only for builds that were given google-services.json.
+function withFirebase(config) {
+  if (process.env.FIREBASE_ENABLED !== '1') return config;
+  const file = process.env.FIREBASE_GOOGLE_SERVICES_FILE;
+  if (!file || !require('fs').existsSync(file)) {
+    throw new Error('FIREBASE_ENABLED=1 but FIREBASE_GOOGLE_SERVICES_FILE does not point to the google-services.json file.');
+  }
+  return {
+    ...config,
+    android: { ...config.android, googleServicesFile: file },
+    plugins: [...(config.plugins || []), '@react-native-firebase/app'],
+  };
+}
+
+module.exports = (args) => withFirebase(withMappls(withGoogleMaps(withVersionCode(build(args)))));
 
 function build({ config }) {
   checkCloudBuild();

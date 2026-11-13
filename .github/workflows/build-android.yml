@@ -47,6 +47,7 @@ jobs:
           HAS_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
           HAS_MAPS_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY != '' }}
           HAS_MAPPLS: ${{ secrets.MAPPLS_ANDROID_CONFIG_ZIP_BASE64 != '' }}
+          HAS_FIREBASE: ${{ secrets.FIREBASE_GOOGLE_SERVICES_BASE64 != '' }}
         run: |
           fail() { echo "::error::$1"; exit 1; }
           if [ "$KIND" = "live" ]; then
@@ -69,6 +70,16 @@ jobs:
               echo "::warning::The Mappls files are saved, but this build is signed with a throwaway key, which Mappls would reject. Using the placeholder map. Add the four ANDROID_* secrets to use Mappls."
             fi
           fi
+          firebaseOn=false
+          if [ "$HAS_FIREBASE" = "true" ]; then
+            if [ "$KIND" != "live" ]; then
+              echo "::notice::Firebase phone sign-in is not used in the demo build."
+            elif [ "$HAS_KEY" != "true" ]; then
+              echo "::warning::The Firebase file is saved, but this build is signed with a throwaway key, which Firebase would not recognise. Add the four ANDROID_* secrets to use Firebase sign-in."
+            else
+              firebaseOn=true
+            fi
+          fi
           {
             echo "ANDROID_VERSION_CODE=${GITHUB_RUN_NUMBER}"
             if [ "$KIND" = "demo" ]; then
@@ -83,6 +94,10 @@ jobs:
             if [ "$mapplsOn" = "true" ]; then
               echo "MAPPLS_ENABLED=1"
               echo "EXPO_PUBLIC_MAPS=mappls"
+            fi
+            if [ "$firebaseOn" = "true" ]; then
+              echo "FIREBASE_ENABLED=1"
+              echo "EXPO_PUBLIC_AUTH=firebase"
             fi
           } >> "$GITHUB_ENV"
 
@@ -125,6 +140,34 @@ jobs:
           fi
           echo "MAPPLS_CONFIG_DIR=$dir" >> "$GITHUB_ENV"
           echo "Mappls files unpacked (their contents are never shown)."
+
+      - name: Unpack the Firebase file
+        if: env.FIREBASE_ENABLED == '1'
+        env:
+          FIREBASE_B64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_BASE64 }}
+        run: |
+          f="$RUNNER_TEMP/google-services.json"
+          if ! printf '%s' "$FIREBASE_B64" | tr -d '[:space:]' | base64 -d > "$f" 2>/dev/null; then
+            echo "::error::FIREBASE_GOOGLE_SERVICES_BASE64 is not valid. Make it again from google-services.json (see GO_LIVE.md)."
+            exit 1
+          fi
+          python3 - "$f" <<'PY'
+          import json, os, sys
+          try:
+              d = json.load(open(sys.argv[1]))
+              project = d["project_info"]["project_id"]
+              mine = [c for c in d.get("client", []) if c["client_info"]["android_client_info"]["package_name"] == "in.instaride.app"]
+          except Exception:
+              print("::error::The Firebase file could not be read. Download google-services.json again from the Firebase console.")
+              sys.exit(1)
+          if not mine:
+              print("::error::This google-services.json is not for the app in.instaride.app. Add that Android app in Firebase and download the file again.")
+              sys.exit(1)
+          print("::notice::Reminder: Firebase keeps your signing-key fingerprints (SHA-1 and SHA-256) in Project settings, not in this file. Make sure both are added there, or phone sign-in may be refused.")
+          with open(os.environ["GITHUB_ENV"], "a") as out:
+              out.write("FIREBASE_PROJECT_ID_CHECK=" + project + "\nFIREBASE_GOOGLE_SERVICES_FILE=" + sys.argv[1] + "\n")
+          print("Firebase file checked (project id " + project + "). Its contents are not shown.")
+          PY
 
       - name: Make the Android project
         env:
@@ -197,6 +240,8 @@ jobs:
             *) map_note="placeholder (no Mappls files, or not signed with your own key)" ;;
           esac
 
+          if [ "${FIREBASE_ENABLED:-}" = "1" ]; then auth_note="Firebase (codes sent by Google)"; else auth_note="codes from our own server"; fi
+
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
           [ -x "$apksigner" ] || { echo "::error::apksigner was not found on this machine"; exit 1; }
           mkdir -p dist
@@ -226,6 +271,14 @@ jobs:
             fi
           fi
 
+          if [ "${FIREBASE_ENABLED:-}" = "1" ]; then
+            if unzip -p dist/instaride.apk resources.arsc | python3 -c "import sys; d = sys.stdin.buffer.read(); p = sys.argv[1]; sys.exit(0 if (p.encode() in d or p.encode('utf-16le') in d) else 1)" "$FIREBASE_PROJECT_ID_CHECK"; then
+              echo "Check passed: the Firebase settings are inside the app."
+            else
+              echo "::warning::Could not find the Firebase settings inside the finished app. If phone sign-in fails on the phone, check the Firebase file and fingerprints."
+            fi
+          fi
+
           {
             echo "commit:        $GITHUB_SHA"
             echo "built:         $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -233,6 +286,7 @@ jobs:
             echo "signed with:   $signing"
             echo "signing SHA-256: ${fingerprint}"
             echo "map:           ${map_note}"
+            echo "phone sign-in: ${auth_note}"
             (cd dist && sha256sum ./* && stat -c '%s bytes  %n' ./*)
           } > dist/build-info.txt
           cat dist/build-info.txt
@@ -245,6 +299,7 @@ jobs:
             echo "- Signed with: ${signing}"
             echo "- Signing SHA-256: \`${fingerprint}\` (must match the fingerprint registered with Mappls)"
             echo "- Map: ${map_note}"
+            echo "- Phone sign-in: ${auth_note}"
             echo "- On your phone: open the downloaded \`instaride.apk\`, and allow \"install unknown apps\" if Android asks."
             if [ "$PLAY_BUNDLE" = "true" ]; then echo "- Upload \`instaride.aab\` to the Google Play Console."; fi
             echo "- If this repository is public, anyone with a GitHub account can download these files. They contain no secrets."

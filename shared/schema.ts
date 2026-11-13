@@ -236,11 +236,14 @@ const vehicleInputSchema = z.object({
 export const otpRequestSchema = z.object({ phone: phoneSchema });
 
 /** Step 2: check the code. An existing account is signed in; otherwise the app collects details. */
-export const otpVerifySchema = z.object({
-  phone: phoneSchema,
-  otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
-  role: z.enum(['rider', 'driver']),
-});
+export const otpVerifySchema = z
+  .object({
+    phone: phoneSchema,
+    otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
+    idToken: z.string().min(100).max(5000).optional(), // Firebase's signed proof, instead of the code
+    role: z.enum(['rider', 'driver']),
+  })
+  .refine((v) => !!(v.otp || v.idToken), { message: 'Enter the 6-digit code', path: ['otp'] });
 
 /** Step 3 (new accounts only): details, with the proof that the phone number was verified. */
 export const signupSchema = z.object({
@@ -316,10 +319,13 @@ export const favouriteSchema = z.object({
   lng: z.number().min(-180).max(180),
 });
 
-export const deleteAccountSchema = z.object({
-  otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
-  reason: z.string().trim().max(200).optional(),
-});
+export const deleteAccountSchema = z
+  .object({
+    otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
+    idToken: z.string().min(100).max(5000).optional(), // Firebase's signed proof, instead of the code
+    reason: z.string().trim().max(200).optional(),
+  })
+  .refine((v) => !!(v.otp || v.idToken), { message: 'Enter the 6-digit code', path: ['otp'] });
 
 export const sosSchema = z.object({
   lat: z.number().min(-90).max(90).optional(),

@@ -8,6 +8,7 @@ import AppModal, { useAppModal } from '@/components/AppModal';
 import { useAuth } from '@/lib/auth-context';
 import { goToWelcome } from '@/lib/nav';
 import { apiRequest } from '@/lib/query-client';
+import { requestPhoneProof, finishPhoneProof } from '@/lib/phone-proof';
 import Colors from '@/constants/colors';
 
 const REASONS = ['I do not need the service', 'Poor app experience', 'Worried about my privacy', 'Moved to another app', 'Changed my phone number'];
@@ -31,8 +32,7 @@ export default function DeleteAccountScreen() {
   const sendCode = async () => {
     setBusy(true);
     try {
-      const res = await apiRequest('POST', '/api/me/otp');
-      const out = await res.json();
+      const out = await requestPhoneProof('/api/me/otp', user?.phone || '');
       setSent(true);
       setCountdown(out.resendAfterSeconds || 30);
     } catch (e: any) {
@@ -51,7 +51,8 @@ export default function DeleteAccountScreen() {
       async () => {
         setBusy(true);
         try {
-          await apiRequest('DELETE', '/api/me', { otp: code, reason: [reason, other.trim()].filter(Boolean).join(': ').slice(0, 200) || undefined });
+          const proof = await finishPhoneProof(code); // the typed code, or Firebase's signed proof
+          await apiRequest('DELETE', '/api/me', { ...proof, reason: [reason, other.trim()].filter(Boolean).join(': ').slice(0, 200) || undefined });
           await logout();
           goToWelcome();
         } catch (e: any) {

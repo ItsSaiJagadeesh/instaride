@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import { apiRequest, setAuthToken, setUnauthorizedHandler } from '@/lib/query-client';
+import { requestPhoneProof, finishPhoneProof } from '@/lib/phone-proof';
 import { loadToken, saveToken, clearToken } from '@/lib/token-store';
 import type { User, SignupInput } from '@shared/schema';
 
@@ -65,13 +66,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return body.user;
   };
 
-  const requestOtp = async (phone: string) => {
-    const res = await apiRequest('POST', '/api/auth/otp/request', { phone });
-    return res.json();
-  };
+  const requestOtp = (phone: string) => requestPhoneProof('/api/auth/otp/request', phone, { phone });
 
   const verifyOtp = async (phone: string, otp: string, role: 'rider' | 'driver'): Promise<VerifyResult> => {
-    const res = await apiRequest('POST', '/api/auth/otp/verify', { phone, otp, role });
+    const proof = await finishPhoneProof(otp); // the typed code, or Firebase's signed proof, whichever this number uses
+    const res = await apiRequest('POST', '/api/auth/otp/verify', { phone, ...proof, role });
     const body = await res.json();
     if (body.needsSignup) return { needsSignup: true, signupToken: body.signupToken };
     return { user: await startSession(body) };

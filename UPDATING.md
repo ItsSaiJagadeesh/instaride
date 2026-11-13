@@ -42,3 +42,10 @@ No data migration is needed: the new fields are optional, and existing rides kee
 `deploy/set-twilio.sh` connects Twilio on a running server (run `sudo bash deploy/set-twilio.sh`; it asks privately, so the Auth Token is never shown or pasted anywhere else).
 The ride start code is now the **last 4 digits of the rider's mobile number** (`RIDE_CODE_MODE=phone_last4`, the default). Set `RIDE_CODE_MODE=random` in `deploy/.env`
 for a new random code on every ride, which is harder to guess because it changes each time. After editing `.env` run `docker compose up -d --force-recreate app`.
+
+## Update: Firebase phone sign-in
+
+New dependencies (`@react-native-firebase/app` and `auth`, 27.1.1): run `npm install` once. New files: `server/firebase.ts`, `lib/phone-proof.ts`, `scripts/make-firebase-secret.ps1`,
+`scripts/firebase-auth-test.mjs`, `deploy/set-firebase.sh`. The server now tells the app, number by number, how to prove it ("mode": "code" or "firebase"). With `FIREBASE_PROJECT_ID`
+set, numbers that are not in `OTP_FIXED` prove themselves with Firebase, and the server checks Google's signed proof itself (signature, project, freshness, phone number, used once).
+Apps built before this update cannot sign in those numbers ("please update the app"). Without `FIREBASE_PROJECT_ID`, nothing changes. Deleting an account is confirmed the same way.

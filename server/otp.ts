@@ -12,6 +12,7 @@ import { randomInt, createHmac, timingSafeEqual } from "crypto";
 import { storage } from "./storage";
 import { sendSms } from "./sms";
 import { hmacSecret } from "./auth";
+import { firebaseEnabled, verifyFirebaseIdToken, ProofError } from "./firebase";
 
 export class OtpError extends Error {
   status: number;
@@ -90,6 +91,59 @@ export async function sendOtp(phone: string): Promise<{ resendAfterSeconds: numb
 }
 
 /** Checks a code. A correct code is used up. Throws OtpError with a message the app can show. */
+export type ProofMode = "code" | "firebase";
+
+/**
+ * How a number proves it is theirs:
+ *   "code"      the 6-digit code made and (unless it is a fixed test number) texted by this server;
+ *   "firebase"  Firebase texts the code, and the app hands the server Google's signed proof.
+ * Numbers with a fixed test code always use "code", so testers and Play Store reviewers never depend on SMS.
+ */
+export function proofMode(phone: string): ProofMode {
+  if (fixedCodeFor(phone)) return "code";
+  return firebaseEnabled() ? "firebase" : "code";
+}
+
+/**
+ * Starts proving a phone number. For "code" it creates and texts the code. For "firebase" it only applies the same
+ * limits (wait between requests, and a cap per hour, so one number cannot run up text-message costs). Firebase sends the text.
+ */
+export async function startPhoneProof(phone: string): Promise<{ resendAfterSeconds: number; mode: ProofMode }> {
+  if (proofMode(phone) === "code") {
+    const out = await sendOtp(phone);
+    return { ...out, mode: "code" };
+  }
+  const existing = await storage.getOtp(phone);
+  const now = Date.now();
+  if (existing) {
+    const wait = Math.ceil((existing.sentAt + resendGap() * 1000 - now) / 1000);
+    if (wait > 0) throw new OtpError(`Please wait ${wait} seconds before asking for a new code.`, 429);
+  }
+  if ((await storage.countOtpSend(phone)) > maxSendsPerHour()) {
+    throw new OtpError("Too many codes were requested for this number. Please try again in an hour.", 429);
+  }
+  await storage.setOtp(phone, { hash: "firebase", attempts: 0, sentAt: now }, ttl());
+  return { resendAfterSeconds: resendGap(), mode: "firebase" };
+}
+
+/** Checks the proof the app sends: the 6-digit code, or a Firebase proof. Throws a message the app can show. */
+export async function verifyPhoneProof(phone: string, proof: { otp?: string; idToken?: string }): Promise<void> {
+  const mode = proofMode(phone);
+  if (proof.idToken) {
+    if (mode !== "firebase") throw new OtpError("Please sign in with the 6-digit code for this number.");
+    try {
+      await verifyFirebaseIdToken(proof.idToken, phone);
+    } catch (e) {
+      if (e instanceof ProofError) throw new OtpError(e.message, e.status);
+      throw e;
+    }
+    return;
+  }
+  if (!proof.otp) throw new OtpError("Enter the 6-digit code");
+  if (mode === "firebase") throw new OtpError("Please update the InstaRide app to sign in with this number.");
+  await checkOtp(phone, proof.otp);
+}
+
 export async function checkOtp(phone: string, code: string): Promise<void> {
   const rec = await storage.getOtp(phone);
   if (!rec) throw new OtpError("This code has expired. Ask for a new one.");
