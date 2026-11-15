@@ -8,7 +8,7 @@ check('Call opens the dialler with +91 and the 10 digits, nothing more', telUrl(
 check('a number typed with spaces or +91 still gives the same link', telUrl('+91 98765 43210') === 'tel:+919876543210' && telUrl('09876543210') === 'tel:+919876543210');
 for (const [greeting, label] of [['Namaste Sir', 'Sir'], ['Namaste Madam', 'Madam'], ['Namaste', 'plain']] as const) {
   const text = whatsappMessage(greeting);
-  check(`the ${label} message starts with the right greeting and has the full text`, text.startsWith(greeting + ', I am your InstaDriver. I have accepted your ride request and am on my way to your pickup location. Please let me know if you need any assistance.'), text);
+  check(`the ${label} message starts with the right greeting and has the full text`, text.startsWith(greeting + ', I am your InstaDriver. I am contacting you regarding your InstaRide pickup.') && text.length === (greeting + ', I am your InstaDriver. I am contacting you regarding your InstaRide pickup.').length, text);
 }
 const text = whatsappMessage('Namaste Madam');
 const app = whatsappAppUrl(phone, text), web = whatsappWebUrl(phone, text);

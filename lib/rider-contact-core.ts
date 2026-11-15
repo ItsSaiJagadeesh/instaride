@@ -7,7 +7,7 @@ const tenDigits = (phone: string) => phone.replace(/\D/g, '').slice(-10);
 
 /** The greeting comes from the server, which works it out from the rider's own saved gender. */
 export function whatsappMessage(greeting: string): string {
-  return `${greeting}, I am your InstaDriver. I have accepted your ride request and am on my way to your pickup location. Please let me know if you need any assistance.`;
+  return `${greeting}, I am your InstaDriver. I am contacting you regarding your InstaRide pickup.`;
 }
 
 export const telUrl = (phone: string) => `tel:+91${tenDigits(phone)}`;

@@ -55,6 +55,12 @@ export default function RiderContactCard({ rideId, status }: { rideId: string; s
           <Text style={styles.phone}>+91 {info.phone}</Text>
         </View>
       </View>
+      {!!info.pickupAddress && (
+        <View style={styles.pickupRow} accessibilityLabel="Pickup location">
+          <Ionicons name="location" size={16} color={Colors.primary} />
+          <Text style={styles.pickupText} numberOfLines={2}>Pickup: {info.pickupAddress}</Text>
+        </View>
+      )}
       <View style={styles.buttons}>
         <Pressable
           style={({ pressed }) => [styles.btn, styles.callBtn, pressed && styles.pressed]}
@@ -84,6 +90,8 @@ const styles = StyleSheet.create({
   who: { flex: 1 },
   name: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.text },
   phone: { fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textLight, marginTop: 1 },
+  pickupRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8 },
+  pickupText: { flex: 1, fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textLight },
   buttons: { flexDirection: 'row', gap: 10, marginTop: 10 },
   btn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 12 },
   callBtn: { backgroundColor: '#1D7FE8' },

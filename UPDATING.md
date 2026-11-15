@@ -57,3 +57,13 @@ automatically). The greeting follows the rider's own saved gender (Namaste Sir, 
 `GET /api/rides/:id/rider-contact`, which only the driver assigned to that live ride can use. It is refused for other drivers, riders, the admin console and signed-out users, and stops
 working the moment the ride is cancelled, handed to another driver or finished. The number is not in the ride record or the request list. No database change is needed (gender is optional).
 New files: `components/RiderContactCard.tsx`, `lib/rider-contact-core.ts`, `scripts/rider-contact-test.ts`.
+
+## Update: fixed sign-in codes are now an explicit choice in production; final WhatsApp wording; pickup on the contact card
+
+- **Fixed codes (`OTP_FIXED`) are ignored in production unless `ALLOW_FIXED_OTP=yes` is set.** Turn them on or off with `sudo bash deploy/set-fixed-otp.sh on | off | clear`
+  (`clear` also empties the list). The server prints one security line at start-up saying how many numbers are involved, never the numbers or the codes. Development is unchanged.
+  After updating a server that already uses fixed codes, run `set-fixed-otp.sh on` straight away, or those numbers stop working. Switch them off before the public launch.
+- The WhatsApp message is now: "Namaste [Sir/Madam], I am your InstaDriver. I am contacting you regarding your InstaRide pickup." (plain "Namaste" when gender is other or unset).
+- The driver's contact card now also shows the pickup location.
+- Real text messages from Firebase need billing enabled on the Firebase project (the app reports `auth/billing-not-enabled` without it).
+New files: `deploy/set-fixed-otp.sh`, `scripts/fixed-otp-guard-test.mjs`.

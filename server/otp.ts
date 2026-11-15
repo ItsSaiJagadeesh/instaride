@@ -6,7 +6,8 @@
  * Special codes, for testing and for Google's Play Store reviewers:
  *   OTP_TEST_CODE=123456          every number gets this code. Refused in production.
  *   OTP_FIXED=9876500001:123456   only these numbers get a fixed code (and no SMS is sent). Allowed in
- *                                 production on purpose: use for demo accounts that hold no real data.
+ *                                 production on purpose: use for demo accounts that hold no real data. In production they are ignored
+ *                                 unless ALLOW_FIXED_OTP=yes is also set (see deploy/set-fixed-otp.sh).
  */
 import { randomInt, createHmac, timingSafeEqual } from "crypto";
 import { storage } from "./storage";
@@ -41,6 +42,15 @@ export function assertOtpConfig() {
       throw new Error("OTP_FIXED must look like 9876500001:123456,9876500002:123456");
     }
   }
+  // Never print the numbers or the codes, only how many.
+  const n = fixedEntries().length;
+  if (process.env.NODE_ENV === "production" && n > 0) {
+    if (fixedAllowed()) {
+      console.warn(`[security] Fixed sign-in codes are ACTIVE in production for ${n} number(s) (ALLOW_FIXED_OTP=yes). Use them for the pilot and store review only, and switch them off before the public launch.`);
+    } else {
+      console.warn(`[security] OTP_FIXED lists ${n} number(s) but it is ignored in production, because ALLOW_FIXED_OTP is not "yes".`);
+    }
+  }
 }
 
 function fixedEntries(): [string, string][] {
@@ -54,8 +64,12 @@ function fixedEntries(): [string, string][] {
   return out;
 }
 
+/** Fixed codes are a testing tool. In production they work only when someone explicitly switched them on (ALLOW_FIXED_OTP=yes). */
+const fixedAllowed = () => process.env.NODE_ENV !== "production" || (process.env.ALLOW_FIXED_OTP || "").trim().toLowerCase() === "yes";
+
 function fixedCodeFor(phone: string): string | null {
   if (process.env.NODE_ENV !== "production" && process.env.OTP_TEST_CODE) return process.env.OTP_TEST_CODE;
+  if (!fixedAllowed()) return null;
   const hit = fixedEntries().find(([p]) => p === phone);
   return hit ? hit[1] : null;
 }
