@@ -67,3 +67,41 @@ New files: `components/RiderContactCard.tsx`, `lib/rider-contact-core.ts`, `scri
 - The driver's contact card now also shows the pickup location.
 - Real text messages from Firebase need billing enabled on the Firebase project (the app reports `auth/billing-not-enabled` without it).
 New files: `deploy/set-fixed-otp.sh`, `scripts/fixed-otp-guard-test.mjs`.
+
+## Update: destination search card no longer runs off the top of the screen
+
+The "Set your destination" card is now held in a frame that starts just under the header and ends on the keyboard. The title and the search box stay fixed at the top of the card, the suggestions
+(at most 6) sit directly below the box, and the suggestions, recent places and buttons scroll inside the card. Before, many suggestions made the card taller than the screen, so its top (the
+title and the search box) went off the top edge and the list covered the header. App change only: no server update is needed. `scripts/mock-geocoder.mjs` (tests only) now returns 8 results for
+a search containing "market", to reproduce this.
+
+## Update: peer reviews of drivers (tags and a written review the driver can read)
+
+- After a trip the rider can still give 1 to 5 stars. New: pick quick tags (Polite, On time, Safe driving, Clean vehicle, Knew the route, Helpful) and write a short review (up to 300 characters).
+  The driver can read the tags and the review **without the rider's name**. The old private note to the admins is kept (behind "Add a private note for the InstaRide team") and drivers never see it.
+- The driver has a new **My reviews** screen (Settings, then My reviews): the average, how often each tag was chosen, and the written reviews. It shows only the date, never the rider's name, number or the trip.
+  Server: `GET /api/driver/reviews` (drivers only).
+- An admin can hide a written review from the driver (the stars and tags still count) from the console: Rides, then the star button on a trip, then "Hide from driver".
+  Server: `PUT /api/admin/rides/:id/review/hide` (admins only).
+- Needs a **server update** (new routes) and a new app build. No database change: the new fields are optional and old reviews keep working.
+- The "Ride Complete" card is now held in the same frame as the destination card, so it can never run under the header on a small phone.
+
+## Update: payment page with a UPI QR code, driver reviews of riders, anonymous reviews both ways
+
+**Payment page.** When the driver taps Complete Ride, both phones show a payment page instead of going straight on.
+- The **driver** sees the fare, a **QR code** (a upi:// link holding the driver's UPI ID and the exact fare, so the rider scans it with any UPI app and types nothing),
+  and two buttons: **Collected in cash** and **Collected by UPI** (with an "are you sure" question). A driver without a UPI ID is asked for one right there.
+- The **rider** sees the fare, **Pay with a UPI app** (opens their own UPI app with everything filled in), a note that the driver's QR can be scanned instead, and **I have paid**
+  (it only tells the driver; the driver still confirms).
+- InstaRide never holds the money, and UPI cannot tell us when a payment arrives, so the **driver's confirmation** ends the payment step. Then the reviews open.
+- A driver's UPI ID is set in Edit profile (drivers only). It is only ever sent to the rider and driver of that trip, as part of the payment link, and never appears in ride records or lists.
+- Server: `GET /api/rides/:id/payment`, `PUT /api/rides/:id/payment/collect`, `PUT /api/rides/:id/payment/claim`. The driver's screen keeps an unpaid finished trip until it is collected, even after the app is closed.
+- Trips finished before this update have no payment record and count as paid, so their reviews keep working.
+
+**Reviews both ways, anonymous.** After the payment the rider reviews the driver (as before) and the **driver now reviews the rider** (stars, tags, a written review, an optional private note to admins).
+Each side reads what the other said about them under Settings, then My reviews, **without names**: the lists show only the month, the stars, the tags and the written review. A trip record no longer
+carries the review written about you (the author keeps their own copy), so nobody can match a review to a trip. Admins can hide either written review (Rides, then the trip, then Hide).
+Server: `PUT /api/rides/:id/rider-review`, `GET /api/rider/reviews`; the earlier `/api/driver/reviews` now shows the month instead of the date.
+
+Needs a **server update** and a new app build. Run `npm install` once (new package `qrcode-generator`, pure JavaScript). No database change: all new fields are optional.
+New files: `server/payments.ts`, `components/UpiQr.tsx`, `components/DriverPaymentCard.tsx`, `components/RiderPaymentCard.tsx`, `components/TripReviewForm.tsx`, `scripts/payments-test.ts`.

@@ -8,6 +8,12 @@ http.createServer((req, res) => {
   if (u.pathname === "/__last") return res.end(JSON.stringify({ calls, last }));
   calls++;
   last = { path: u.pathname, query: Object.fromEntries(u.searchParams), ua: req.headers["user-agent"] };
+  if (u.pathname === "/search" && /market/i.test(u.searchParams.get("q") || "")) {
+    // Many results, like a busy search on a phone: used to check the suggestion list never pushes the search box off the screen.
+    return res.end(JSON.stringify(Array.from({ length: 8 }, (_, i) => ({
+      display_name: `Market Place ${i + 1}, Dwaraka Tirumala, West Godavari, Andhra Pradesh, India`, lat: String(17.14 + i * 0.002), lon: String(81.30 + i * 0.002),
+    }))));
+  }
   if (u.pathname === "/search") {
     return res.end(JSON.stringify([
       { display_name: "Bus Stand, Jangareddygudem, West Godavari, Andhra Pradesh, 534447, India", lat: "17.1400", lon: "81.3050" },

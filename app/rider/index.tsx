@@ -18,7 +18,8 @@ import { roleAllowed } from '@/lib/variant';
 import Animated, { FadeInDown, FadeInUp, SlideInDown, FadeIn } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import type { Ride, User, VehicleType } from '@shared/schema';
-import { RIDER_CANCEL_REASONS } from '@shared/schema';
+import { RIDER_CANCEL_REASONS, REVIEW_TAGS } from '@shared/schema';
+import RiderPaymentCard from '@/components/RiderPaymentCard';
 
 const { width, height } = Dimensions.get('window');
 const ASPECT_RATIO = width / height;
@@ -73,9 +74,14 @@ function RiderScreenInner() {
   const [savingPlace, setSavingPlace] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
-  const [reviewComment, setReviewComment] = useState('');
+  const [reviewComment, setReviewComment] = useState(''); // private note to the admins
+  const [reviewTags, setReviewTags] = useState<string[]>([]);
+  const [reviewPeer, setReviewPeer] = useState(''); // written review the driver can read (without the rider's name)
+  const [showAdminNote, setShowAdminNote] = useState(false);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [paymentDone, setPaymentDone] = useState(false); // the driver has confirmed the payment, so the review opens
+  const onPaymentCollected = useCallback(() => setPaymentDone(true), []);
   const [route, setRoute] = useState<RouteInfo | null>(null);
 
   const phaseRef = useRef<RiderPhase>(phase);
@@ -528,6 +534,8 @@ function RiderScreenInner() {
       await apiRequest('PUT', `/api/rides/${activeRide.id}/review`, {
         rating: reviewRating,
         comment: reviewComment.trim() || undefined,
+        tags: reviewTags.length ? reviewTags : undefined,
+        peerReview: reviewPeer.trim() || undefined,
       });
       setReviewSubmitted(true);
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -548,6 +556,10 @@ function RiderScreenInner() {
     setAddressInput('');
     setReviewRating(0);
     setReviewComment('');
+    setReviewTags([]);
+    setReviewPeer('');
+    setShowAdminNote(false);
+    setPaymentDone(false);
     setReviewSubmitted(false);
   };
 
@@ -672,7 +684,8 @@ function RiderScreenInner() {
       )}
 
       {phase === 'selecting_dropoff' && (
-        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, { paddingBottom: bottomInset + 16, bottom: keyboardHeight }]}>
+        <View style={[styles.dropoffFrame, { top: topInset + 64, bottom: keyboardHeight }]} pointerEvents="box-none">
+        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.dropoffCard, { paddingBottom: bottomInset + 16 }]}>
           <View style={styles.cardHandle} />
           <Text style={styles.cardTitle}>Set your destination</Text>
 
@@ -701,12 +714,13 @@ function RiderScreenInner() {
             </Pressable>
           </View>
 
+          <ScrollView style={styles.cardScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {showSuggestions && addressSuggestions.length > 0 && (
             <View style={styles.suggestionsContainer}>
-              {addressSuggestions.map((item, idx) => (
+              {addressSuggestions.slice(0, 6).map((item, idx) => (
                 <Pressable
                   key={`${item.lat}-${item.lng}-${idx}`}
-                  style={({ pressed }) => [styles.suggestionItem, pressed && { backgroundColor: Colors.background }, idx < addressSuggestions.length - 1 && styles.suggestionBorder]}
+                  style={({ pressed }) => [styles.suggestionItem, pressed && { backgroundColor: Colors.background }, idx < Math.min(addressSuggestions.length, 6) - 1 && styles.suggestionBorder]}
                   onPress={() => selectSuggestion(item)}
                 >
                   <Ionicons name="location-outline" size={18} color={Colors.primary} style={{ marginTop: 2 }} />
@@ -796,7 +810,9 @@ function RiderScreenInner() {
               </View>
             </View>
           )}
+          </ScrollView>
         </Animated.View>
+        </View>
       )}
 
       {phase === 'confirming' && fareEstimate && (
@@ -975,20 +991,23 @@ function RiderScreenInner() {
       )}
 
       {phase === 'completed' && activeRide && (
-        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, { paddingBottom: bottomInset + 16, bottom: keyboardHeight }]}>
+        <View style={[styles.dropoffFrame, { top: topInset + 64, bottom: keyboardHeight }]} pointerEvents="box-none">
+        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.dropoffCard, { paddingBottom: bottomInset + 16 }]}>
           <View style={styles.cardHandle} />
-          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: height * 0.55 }}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll}>
             <View style={styles.completedContent}>
               <View style={styles.completedIcon}>
                 <Ionicons name="checkmark-circle" size={48} color={Colors.success} />
               </View>
               <Text style={styles.completedTitle}>Ride Complete!</Text>
-              {activeRide.fare && (
+              {activeRide.fare && !(activeRide.payment?.status === 'pending' && !paymentDone) && (
                 <Text style={styles.completedFare}>{formatINR(activeRide.fare.totalFare)}</Text>
               )}
             </View>
 
-            {!reviewSubmitted ? (
+            {activeRide.payment?.status === 'pending' && !paymentDone ? (
+              <RiderPaymentCard rideId={activeRide.id} onCollected={onPaymentCollected} />
+            ) : !reviewSubmitted ? (
               <View style={styles.reviewSection}>
                 <Text style={styles.reviewTitle}>Rate your driver</Text>
                 {driverInfo && (
@@ -1003,6 +1022,7 @@ function RiderScreenInner() {
                         if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       }}
                       hitSlop={8}
+                      accessibilityLabel={`${star} ${star === 1 ? 'star' : 'stars'}`}
                     >
                       <Ionicons
                         name={star <= reviewRating ? 'star' : 'star-outline'}
@@ -1012,20 +1032,60 @@ function RiderScreenInner() {
                     </Pressable>
                   ))}
                 </View>
+                <View style={styles.tagRow}>
+                  {REVIEW_TAGS.map((tag) => {
+                    const on = reviewTags.includes(tag);
+                    return (
+                      <Pressable
+                        key={tag}
+                        accessibilityLabel={`Tag ${tag}`}
+                        accessibilityState={{ selected: on }}
+                        onPress={() => setReviewTags((t) => (on ? t.filter((x) => x !== tag) : [...t, tag]))}
+                        style={[styles.tagChip, on && styles.tagChipOn]}
+                      >
+                        <Text style={[styles.tagChipText, on && styles.tagChipTextOn]}>{tag}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
                 <TextInput
                   style={styles.reviewInput}
-                  placeholder="Leave a private comment for admin (optional)"
+                  placeholder="Write a review for your driver (optional)"
                   placeholderTextColor={Colors.textLight}
-                  value={reviewComment}
-                  onChangeText={setReviewComment}
+                  value={reviewPeer}
+                  onChangeText={setReviewPeer}
                   multiline
                   numberOfLines={3}
                   textAlignVertical="top"
-                  maxLength={500}
+                  maxLength={300}
+                  accessibilityLabel="Review for your driver"
                 />
                 <Text style={styles.reviewPrivacyNote}>
-                  <Ionicons name="lock-closed" size={11} color={Colors.textLight} /> Your comment is private and only visible to platform admins
+                  <Ionicons name="eye-outline" size={11} color={Colors.textLight} /> Your driver will read this review, but will not see your name
                 </Text>
+                {showAdminNote ? (
+                  <>
+                    <TextInput
+                      style={styles.reviewInput}
+                      placeholder="Private note for the InstaRide team (optional)"
+                      placeholderTextColor={Colors.textLight}
+                      value={reviewComment}
+                      onChangeText={setReviewComment}
+                      multiline
+                      numberOfLines={3}
+                      textAlignVertical="top"
+                      maxLength={500}
+                      accessibilityLabel="Private note to admins"
+                    />
+                    <Text style={styles.reviewPrivacyNote}>
+                      <Ionicons name="lock-closed" size={11} color={Colors.textLight} /> This note is private and only visible to platform admins
+                    </Text>
+                  </>
+                ) : (
+                  <Pressable onPress={() => setShowAdminNote(true)} accessibilityLabel="Add a private note for the InstaRide team" style={{ marginBottom: 14 }}>
+                    <Text style={styles.adminNoteLink}>Add a private note for the InstaRide team</Text>
+                  </Pressable>
+                )}
                 <View style={styles.reviewBtnRow}>
                   <Pressable
                     style={({ pressed }) => [styles.reviewSkipBtn, pressed && styles.btnPressed]}
@@ -1066,6 +1126,7 @@ function RiderScreenInner() {
             )}
           </ScrollView>
         </Animated.View>
+        </View>
       )}
 
       <AppModal {...modalProps} />
@@ -1121,6 +1182,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 12, zIndex: 5,
     ...(Platform.OS !== 'web' ? { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 10 } : {}),
   },
+  // The destination card lives in a frame that starts just under the header and ends on the keyboard, so it can never grow past either.
+  dropoffFrame: { position: 'absolute', left: 0, right: 0, justifyContent: 'flex-end', zIndex: 5 },
+  dropoffCard: { position: 'relative', bottom: undefined, left: undefined, right: undefined, maxHeight: '100%' },
+  cardScroll: { flexGrow: 0, flexShrink: 1 },
   cardHandle: {
     width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 16,
   },
@@ -1313,6 +1378,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12,
     fontSize: 14, fontFamily: 'Inter_400Regular', color: Colors.text, minHeight: 80, marginBottom: 6,
   },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 12 },
+  tagChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
+  tagChipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  tagChipText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.text },
+  tagChipTextOn: { color: Colors.secondary },
+  adminNoteLink: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textLight, textAlign: 'center', textDecorationLine: 'underline' },
   reviewPrivacyNote: {
     fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textLight, textAlign: 'center', marginBottom: 16,
   },

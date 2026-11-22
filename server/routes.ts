@@ -26,6 +26,8 @@ import { searchPlaces, reversePlace } from "./geocode";
 import { startPhoneProof, verifyPhoneProof, OtpError } from "./otp";
 import { SmsError } from "./sms";
 import { buildReadiness, MANUAL_STEPS } from "./readiness";
+import { buildUpiUrl, newPayment, paymentSettled } from "./payments";
+import type { PaymentInfo } from "@shared/schema";
 import {
   otpRequestSchema,
   otpVerifySchema,
@@ -44,6 +46,8 @@ import {
   DOCUMENT_KINDS,
   RIDER_CANCEL_REASONS,
   DRIVER_CANCEL_REASONS,
+  REVIEW_TAGS,
+  RIDER_REVIEW_TAGS,
 } from "@shared/schema";
 import type {
   StoredUser,
@@ -95,8 +99,21 @@ function sanitizeRide(viewer: StoredUser, ride: Ride): Ride {
   if (viewer.role === "driver") delete out.startOtp; // only the InstaRider sees the start OTP
   if (viewer.role !== "admin") delete out.declinedBy; // who rejected a request is nobody else's business
   if (viewer.role !== "admin") delete out.cancelLog;
-  if (viewer.role !== "admin" && out.review) {
-    out.review = { rating: out.review.rating, createdAt: out.review.createdAt };
+  // Reviews are anonymous for the person they are about. A driver never gets the review a rider wrote on a trip record, and a rider never gets the
+  // one a driver wrote: each reads reviews about themselves only in the anonymous lists (/api/driver/reviews and /api/rider/reviews).
+  // The author keeps a copy of their own review, without the private note to the admins.
+  if (viewer.role === "driver") {
+    delete out.review;
+    if (out.riderReview) {
+      const r = out.riderReview;
+      out.riderReview = { rating: r.rating, createdAt: r.createdAt, tags: r.tags, peerReview: r.peerReview };
+    }
+  } else if (viewer.role === "rider") {
+    delete out.riderReview;
+    if (out.review) {
+      const r = out.review;
+      out.review = { rating: r.rating, createdAt: r.createdAt, tags: r.tags, peerReview: r.peerReview };
+    }
   }
   return out;
 }
@@ -496,7 +513,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/rides/driver/:driverId/active", auth, requireSelfOrAdmin("driverId"), async (req, res) => {
     const rides = await storage.getRidesByDriver(req.params.driverId as string);
     const active = rides.find((r) => (ACTIVE as readonly string[]).includes(r.status));
-    return res.json(active ? sanitizeRide(req.user!, active) : null);
+    if (active) return res.json(sanitizeRide(req.user!, active));
+    // A finished trip whose payment has not been collected yet stays on the driver's screen until they confirm it.
+    const owed = rides
+      .filter((r) => r.status === "completed" && r.payment?.status === "pending")
+      .sort((a, b) => new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime())[0];
+    return res.json(owed ? sanitizeRide(req.user!, owed) : null);
   });
 
   app.get("/api/rides/rider/:riderId/active", auth, requireSelfOrAdmin("riderId"), async (req, res) => {
@@ -703,6 +725,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     if (status === "completed") {
       updates.completedAt = new Date().toISOString();
+      const pay = newPayment(ride);
+      if (pay) updates.payment = pay; // reviews open once the driver confirms the payment
       if (ride.fare) {
         const config = await storage.getConfig();
         const feesDue = (user.feesDue || 0) + ride.fare.platformFee;
@@ -730,15 +754,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json(sanitizeRide(user, updated!));
   });
 
+  // One side's review of the other: stars, optional tags, an optional written review (shown to the reviewed person without a name)
+  // and an optional private note to the admins.
+  function parseReviewBody(body: any, allowed: readonly string[]):
+    | { error: string }
+    | { rating: number; comment?: string; tags?: string[]; peerReview?: string } {
+    const rating = Number(body?.rating);
+    if (!(rating >= 1 && rating <= 5)) return { error: "Rating must be between 1 and 5" };
+    let tags: string[] | undefined;
+    if (body?.tags !== undefined) {
+      const t = body.tags;
+      if (!Array.isArray(t) || t.length > allowed.length || t.some((x: unknown) => !allowed.includes(x as string))) return { error: "Please pick tags from the list" };
+      tags = Array.from(new Set(t as string[]));
+    }
+    const comment = typeof body?.comment === "string" ? body.comment.trim().slice(0, 500) : undefined;
+    const peerReview = typeof body?.peerReview === "string" ? body.peerReview.trim().replace(/\s+/g, " ").slice(0, 300) : undefined;
+    return { rating: Math.round(rating), comment: comment || undefined, tags: tags && tags.length ? tags : undefined, peerReview: peerReview || undefined };
+  }
+
   app.put("/api/rides/:id/review", auth, requireRole("rider"), async (req, res) => {
-    const rating = Number(req.body?.rating);
-    const comment = typeof req.body?.comment === "string" ? req.body.comment.trim().slice(0, 500) : undefined;
-    if (!(rating >= 1 && rating <= 5)) return res.status(400).json({ message: "Rating must be between 1 and 5" });
+    const parsed = parseReviewBody(req.body, REVIEW_TAGS);
+    if ("error" in parsed) return res.status(400).json({ message: parsed.error });
     const ride = await storage.getRide(req.params.id as string);
     if (!ride || ride.riderId !== req.user!.id) return res.status(404).json({ message: "Ride not found" });
     if (ride.status !== "completed") return res.status(400).json({ message: "Can only review completed rides" });
+    if (!paymentSettled(ride)) return res.status(400).json({ message: "Please finish the payment first" });
     if (ride.review) return res.status(400).json({ message: "Ride already reviewed" });
-    const review = { rating: Math.round(rating), comment: comment || undefined, createdAt: new Date().toISOString() };
+    const review: NonNullable<Ride["review"]> = { ...parsed, tags: parsed.tags as any, createdAt: new Date().toISOString() };
     const updated = await storage.updateRide(ride.id, { review });
     if (ride.driverId) {
       const reviewed = (await storage.getRidesByDriver(ride.driverId)).filter((r) => r.review);
@@ -747,6 +789,115 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.updateUser(ride.driverId, { rating: Math.round(avg * 10) / 10 });
     }
     return res.json(sanitizeRide(req.user!, updated!));
+  });
+
+  // The driver's review of the rider, once the payment is collected.
+  app.put("/api/rides/:id/rider-review", auth, requireRole("driver"), async (req, res) => {
+    const parsed = parseReviewBody(req.body, RIDER_REVIEW_TAGS);
+    if ("error" in parsed) return res.status(400).json({ message: parsed.error });
+    const ride = await storage.getRide(req.params.id as string);
+    if (!ride || ride.driverId !== req.user!.id) return res.status(404).json({ message: "Ride not found" });
+    if (ride.status !== "completed") return res.status(400).json({ message: "Can only review completed rides" });
+    if (!paymentSettled(ride)) return res.status(400).json({ message: "Please collect the payment first" });
+    if (ride.riderReview) return res.status(400).json({ message: "Ride already reviewed" });
+    const riderReview: NonNullable<Ride["riderReview"]> = { ...parsed, tags: parsed.tags as any, createdAt: new Date().toISOString() };
+    const updated = await storage.updateRide(ride.id, { riderReview });
+    const reviewed = (await storage.getRidesByRider(ride.riderId)).filter((r) => r.riderReview);
+    const avg = reviewed.reduce((s, r) => s + (r.riderReview?.rating || 0), 0) / reviewed.length;
+    await storage.updateUser(ride.riderId, { rating: Math.round(avg * 10) / 10 });
+    return res.json(sanitizeRide(req.user!, updated!));
+  });
+
+  // ---------------------------------------------------------------- payment for a finished trip
+  async function paymentInfoFor(ride: Ride): Promise<PaymentInfo> {
+    const p = ride.payment!;
+    const driver = ride.driverId ? await storage.getUser(ride.driverId) : undefined;
+    return {
+      rideId: ride.id,
+      status: p.status,
+      amount: p.amount,
+      method: p.method,
+      collectedAt: p.collectedAt,
+      riderClaimedAt: p.riderClaimedAt,
+      driverName: ride.driverName,
+      hasUpiId: !!driver?.upiId,
+      // The link for the QR code carries the driver's UPI ID and the exact fare. Only the rider and the driver of this trip get it, and only while unpaid.
+      upiUrl: p.status === "pending" && driver?.upiId ? buildUpiUrl({ upiId: driver.upiId, payeeName: driver.fullName, amount: p.amount, rideId: ride.id }) : undefined,
+    };
+  }
+
+  app.get("/api/rides/:id/payment", auth, async (req, res) => {
+    const ride = await storage.getRide(req.params.id as string);
+    const me = req.user!;
+    if (!ride || (ride.riderId !== me.id && ride.driverId !== me.id) || ride.status !== "completed" || !ride.payment) {
+      return res.status(404).json({ message: "No payment for this ride" });
+    }
+    res.setHeader("Cache-Control", "no-store");
+    return res.json(await paymentInfoFor(ride));
+  });
+
+  // The driver confirms the money arrived (UPI cannot tell us itself).
+  app.put("/api/rides/:id/payment/collect", auth, requireRole("driver"), async (req, res) => {
+    const method = req.body?.method;
+    if (method !== "cash" && method !== "upi") return res.status(400).json({ message: "Say whether you collected cash or UPI" });
+    const ride = await storage.getRide(req.params.id as string);
+    if (!ride || ride.driverId !== req.user!.id || ride.status !== "completed" || !ride.payment) return res.status(404).json({ message: "No payment for this ride" });
+    if (ride.payment.status === "collected") return res.status(400).json({ message: "This payment was already marked as collected" });
+    const updated = await storage.updateRide(ride.id, { payment: { ...ride.payment, status: "collected", method, collectedAt: new Date().toISOString() } });
+    return res.json(await paymentInfoFor(updated!));
+  });
+
+  // The rider says they have paid. It only tells the driver; the driver still confirms.
+  app.put("/api/rides/:id/payment/claim", auth, requireRole("rider"), async (req, res) => {
+    const ride = await storage.getRide(req.params.id as string);
+    if (!ride || ride.riderId !== req.user!.id || ride.status !== "completed" || !ride.payment) return res.status(404).json({ message: "No payment for this ride" });
+    if (ride.payment.status === "collected") return res.status(400).json({ message: "This payment was already marked as collected" });
+    const updated = ride.payment.riderClaimedAt ? ride : await storage.updateRide(ride.id, { payment: { ...ride.payment, riderClaimedAt: new Date().toISOString() } });
+    return res.json(await paymentInfoFor(updated!));
+  });
+
+  // What riders said about this driver. Anonymous on purpose: no name, number or trip details, only the date, the stars, the tags and
+  // the written review. Written reviews an admin has hidden are left out. The private note to admins is never included.
+  app.get("/api/driver/reviews", auth, requireRole("driver"), async (req, res) => {
+    const rides = (await storage.getRidesByDriver(req.user!.id)).filter((r) => r.review);
+    rides.sort((a, b) => b.review!.createdAt.localeCompare(a.review!.createdAt));
+    const tagCounts: Record<string, number> = {};
+    for (const r of rides) for (const t of r.review!.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
+    const average = rides.length ? Math.round((rides.reduce((s, r) => s + r.review!.rating, 0) / rides.length) * 10) / 10 : null;
+    const items = rides.slice(0, 50).map((r) => ({
+      rating: r.review!.rating,
+      tags: r.review!.tags || [],
+      text: r.review!.hidden ? undefined : r.review!.peerReview,
+      month: r.review!.createdAt.slice(0, 7),
+    }));
+    return res.json({ average, count: rides.length, tagCounts, items });
+  });
+
+  // What drivers said about this rider. Anonymous in the same way: no driver name, no trip, only the month, the stars, the tags and the written review.
+  app.get("/api/rider/reviews", auth, requireRole("rider"), async (req, res) => {
+    const rides = (await storage.getRidesByRider(req.user!.id)).filter((r) => r.riderReview);
+    rides.sort((a, b) => b.riderReview!.createdAt.localeCompare(a.riderReview!.createdAt));
+    const tagCounts: Record<string, number> = {};
+    for (const r of rides) for (const t of r.riderReview!.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
+    const average = rides.length ? Math.round((rides.reduce((s, r) => s + r.riderReview!.rating, 0) / rides.length) * 10) / 10 : null;
+    const items = rides.slice(0, 50).map((r) => ({
+      rating: r.riderReview!.rating,
+      tags: r.riderReview!.tags || [],
+      text: r.riderReview!.hidden ? undefined : r.riderReview!.peerReview,
+      month: r.riderReview!.createdAt.slice(0, 7),
+    }));
+    return res.json({ average, count: rides.length, tagCounts, items });
+  });
+
+  // An admin can hide a rider's written review from the driver (the stars still count). Send { "hidden": false } to show it again.
+  // { "which": "rider" } hides the driver's written review of the rider from the rider instead.
+  app.put("/api/admin/rides/:id/review/hide", ...adminOnly, async (req, res) => {
+    const which = req.body?.which === "rider" ? "riderReview" : "review";
+    const ride = await storage.getRide(req.params.id as string);
+    const current = ride?.[which];
+    if (!ride || !current) return res.status(404).json({ message: "Review not found" });
+    const updated = await storage.updateRide(ride.id, { [which]: { ...current, hidden: req.body?.hidden !== false } } as Partial<Ride>);
+    return res.json(updated);
   });
 
   // ---------------------------------------------------------------- events
@@ -986,9 +1137,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/me", auth, async (req, res) => {
     try {
       const p = updateProfileSchema.parse(req.body);
+      if (p.upiId !== undefined && p.upiId !== null && req.user!.role !== "driver") return res.status(400).json({ message: "Only drivers have a UPI ID" });
       const updated = await storage.updateUser(req.user!.id, {
         fullName: p.fullName,
         ...(p.gender !== undefined ? { gender: p.gender ?? undefined } : {}), // null clears it
+        ...(p.upiId !== undefined ? { upiId: p.upiId ?? undefined } : {}), // null clears it
       });
       return res.json(toSafeUser(updated!));
     } catch (e) {

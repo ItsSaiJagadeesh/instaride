@@ -89,6 +89,7 @@ export interface StoredUser {
   emergencyContact?: EmergencyContact;
   favourites?: Favourite[];
   gender?: Gender;
+  upiId?: string; // a driver's UPI ID, used for the payment QR. Only the owner and the admin ever see it as such
 }
 
 /** What the apps receive: no password hash, no file names. */
@@ -119,6 +120,46 @@ export interface PlatformConfig {
 }
 
 /** The reasons offered when cancelling. The server accepts only these (anything else is stored as "Other"). */
+/** Quick tags a driver can pick for a rider after a trip. */
+export const RIDER_REVIEW_TAGS = ['Polite', 'Ready at pickup', 'Respectful', 'Clear directions', 'Easy payment'] as const;
+export type RiderReviewTag = (typeof RIDER_REVIEW_TAGS)[number];
+
+/** One side's review of the other after a trip. comment is a private note to the admins. hidden: an admin hid the written review from the reviewed person. */
+export interface TripReview<T extends string = string> {
+  rating: number;
+  comment?: string;
+  tags?: T[];
+  peerReview?: string;
+  hidden?: boolean;
+  createdAt: string;
+}
+
+/** Money for a finished trip. UPI cannot tell us a payment arrived, so the driver confirms it (cash or UPI). */
+export interface RidePayment {
+  status: 'pending' | 'collected';
+  amount: number; // rupees, the trip's total fare
+  method?: 'cash' | 'upi';
+  collectedAt?: string;
+  riderClaimedAt?: string; // the rider tapped "I have paid"
+}
+
+/** What the rider and the driver of a finished trip see on the payment page (GET /api/rides/:id/payment). */
+export interface PaymentInfo {
+  rideId: string;
+  status: 'pending' | 'collected';
+  amount: number;
+  method?: 'cash' | 'upi';
+  collectedAt?: string;
+  riderClaimedAt?: string;
+  driverName?: string;
+  hasUpiId: boolean; // does the driver have a UPI ID, so a QR can be shown
+  upiUrl?: string; // upi://pay?... with the exact amount filled in. Only while the payment is pending.
+}
+
+/** Quick tags a rider can pick for a driver after a trip. */
+export const REVIEW_TAGS = ['Polite', 'On time', 'Safe driving', 'Clean vehicle', 'Knew the route', 'Helpful'] as const;
+export type ReviewTag = (typeof REVIEW_TAGS)[number];
+
 export const RIDER_CANCEL_REASONS = [
   'Booked by mistake',
   'Driver is taking too long',
@@ -182,7 +223,11 @@ export interface Ride {
   driverName?: string;
   driverVehicle?: VehicleInfo;
   driverRating?: number;
-  review?: { rating: number; comment?: string; createdAt: string };
+  // rating: 1 to 5. tags and peerReview are what the rider says to the DRIVER (shown without the rider's name).
+  // comment is a private note to the admins only. hidden: an admin hid the written review from the driver.
+  review?: TripReview<ReviewTag>; // the rider's review of the driver
+  riderReview?: TripReview<RiderReviewTag>; // the driver's review of the rider
+  payment?: RidePayment; // set when the trip is completed; reviews open once it is collected
   sos?: { at: string; lat?: number; lng?: number; raisedBy: 'rider' | 'driver'; ackBy?: string; ackAt?: string };
 }
 
@@ -307,9 +352,13 @@ export const configUpdateSchema = z
   })
   .partial();
 
+/** A UPI ID (VPA) looks like name@bank. */
+export const UPI_ID_RE = /^[a-zA-Z0-9.\-_]{2,64}@[a-zA-Z][a-zA-Z0-9]{1,31}$/;
+
 export const updateProfileSchema = z.object({
   fullName: z.string().trim().min(2).max(80),
   gender: z.enum(['male', 'female', 'other']).nullable().optional(), // null clears it
+  upiId: z.string().trim().regex(UPI_ID_RE, 'Enter a UPI ID like name@bank').nullable().optional(), // drivers only; null clears it
 });
 
 /** What the assigned driver may see about the rider of a live ride (from GET /api/rides/:id/rider-contact). */

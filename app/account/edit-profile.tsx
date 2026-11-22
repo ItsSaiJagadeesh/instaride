@@ -7,7 +7,7 @@ import AppModal, { useAppModal } from '@/components/AppModal';
 import { useAuth } from '@/lib/auth-context';
 import { apiRequest } from '@/lib/query-client';
 import Colors from '@/constants/colors';
-import type { Gender } from '@shared/schema';
+import { UPI_ID_RE, type Gender } from '@shared/schema';
 
 const GENDERS: { value: Gender | null; label: string }[] = [
   { value: 'male', label: 'Male' },
@@ -21,12 +21,18 @@ export default function EditProfileScreen() {
   const { showAlert, modalProps } = useAppModal();
   const [name, setName] = useState(user?.fullName ?? '');
   const [gender, setGender] = useState<Gender | null>((user?.gender as Gender | undefined) ?? null);
+  const [upi, setUpi] = useState(user?.upiId ?? ''); // drivers only
   const [saving, setSaving] = useState(false);
+  const isDriver = user?.role === 'driver';
 
   const save = async () => {
+    if (isDriver && upi.trim() && !UPI_ID_RE.test(upi.trim())) {
+      showAlert('Check your UPI ID', 'A UPI ID looks like yourname@bank. You can leave it empty to take cash only.');
+      return;
+    }
     setSaving(true);
     try {
-      await apiRequest('PUT', '/api/me', { fullName: name.trim(), gender });
+      await apiRequest('PUT', '/api/me', { fullName: name.trim(), gender, ...(isDriver ? { upiId: upi.trim() || null } : {}) });
       await refreshUser();
       router.back();
     } catch (e: any) {
@@ -61,11 +67,23 @@ export default function EditProfileScreen() {
           </Pressable>
         ))}
       </View>
+      {isDriver && (
+        <Field
+          label="UPI ID (to receive fares)"
+          value={upi}
+          onChangeText={setUpi}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="yourname@bank"
+          maxLength={80}
+          hint="Riders pay you directly by UPI, and the app shows them a QR code with the fare filled in. We never hold your money. Leave it empty to take cash only."
+        />
+      )}
       <PrimaryButton
         title="Save"
         onPress={save}
         loading={saving}
-        disabled={name.trim().length < 2 || (name.trim() === user?.fullName && gender === ((user?.gender as Gender | undefined) ?? null))}
+        disabled={name.trim().length < 2 || (name.trim() === user?.fullName && gender === ((user?.gender as Gender | undefined) ?? null) && (!isDriver || upi.trim() === (user?.upiId ?? '')))}
       />
       <AppModal {...modalProps} />
     </Screen>

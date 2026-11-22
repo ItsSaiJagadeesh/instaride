@@ -55,7 +55,7 @@ export default function RideDetailScreen() {
                 <Line label="Base fare" value={formatINR(r.fare.baseFare)} />
                 <Line label="Distance" value={formatINR(r.fare.distanceFare)} />
                 <Line label="Time" value={formatINR(r.fare.timeFare)} />
-                <Line label="Total fare (paid in cash)" value={formatINR(r.fare.totalFare)} bold />
+                <Line label={`Total fare (${r.payment ? (r.payment.status === 'collected' ? (r.payment.method === 'upi' ? 'paid by UPI' : 'paid in cash') : 'payment pending') : 'paid in cash'})`} value={formatINR(r.fare.totalFare)} bold />
                 {isDriver ? (
                   <>
                     <Line label="Platform fee" value={`− ${formatINR(r.fare.platformFee)}`} />

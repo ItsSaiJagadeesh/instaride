@@ -16,6 +16,17 @@ export default function SettingsScreen() {
         <MenuRow icon="person-outline" title="Edit profile" subtitle={`${user?.fullName ?? ''} · ${user?.phone ?? ''}`} onPress={() => router.push('/account/edit-profile')} last />
       </Card>
 
+      <SectionLabel>Reviews</SectionLabel>
+      <Card>
+        <MenuRow
+          icon="star-outline"
+          title="My reviews"
+          subtitle={user?.role === 'driver' ? 'What riders said about your trips' : 'What drivers said about you'}
+          onPress={() => router.push('/account/my-reviews')}
+          last
+        />
+      </Card>
+
       <SectionLabel>Safety and help</SectionLabel>
       <Card>
         <MenuRow icon="shield-checkmark-outline" title="Safety and emergency contact" onPress={() => router.push('/account/safety')} />

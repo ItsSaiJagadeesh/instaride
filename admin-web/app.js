@@ -377,6 +377,54 @@
             el('p', {}, ask, ' ', reject)))));
   }
 
+  // How a trip was paid: shown next to the fare. Trips from before payments existed show nothing.
+  function payTag(r) {
+    if (!r.payment) return '';
+    if (r.payment.status === 'collected') return ' · ' + (r.payment.method === 'upi' ? 'UPI' : 'cash');
+    return ' · unpaid';
+  }
+
+  // ------------------------------------------------------------------ one trip's review
+  function viewRideReview(r) {
+    // who: 'driver' = the rider's review of the driver, 'rider' = the driver's review of the rider
+    const block = (heading, rv, who) => {
+      if (!rv) return el('div', {}, el('h2', {}, heading), el('p', { class: 'muted' }, 'No review yet'));
+      const other = who === 'driver' ? 'driver' : 'rider';
+      const hideBtn = el('button', { class: 'btn small ' + (rv.hidden ? 'primary' : 'danger'), onclick: async () => {
+        const hide = !rv.hidden;
+        if (hide && !confirm('Hide the written review from the ' + other + '? The stars and tags still count.')) return;
+        hideBtn.disabled = true;
+        try {
+          await api('PUT', '/api/admin/rides/' + r.id + '/review/hide', { hidden: hide, which: who });
+          toast(hide ? 'Hidden from the ' + other : 'Shown to the ' + other + ' again');
+          go('rides');
+        } catch (e) { toast(e.message, true); hideBtn.disabled = false; }
+      } }, rv.hidden ? 'Show to ' + other + ' again' : 'Hide from ' + other);
+      return el('div', {},
+        el('h2', {}, heading),
+        el('div', { class: 'muted small' }, 'The ' + other + ' can read the written review, without the name of who wrote it.'),
+        el('p', {}, '★'.repeat(rv.rating) + '☆'.repeat(5 - rv.rating) + '  (' + rv.rating + ' of 5)'),
+        rv.tags && rv.tags.length ? el('p', {}, rv.tags.flatMap((t) => [pill(t, 'blue'), ' '])) : el('p', { class: 'muted' }, 'No tags chosen'),
+        el('p', {}, rv.peerReview || 'No written review'),
+        rv.hidden ? el('p', {}, pill('Hidden from the ' + other, 'bad')) : null,
+        el('div', { class: 'muted small' }, 'Private note to admins'),
+        el('p', {}, rv.comment || 'None'),
+        hideBtn);
+    };
+    const pay = r.payment
+      ? (r.payment.status === 'collected'
+        ? fmtINR(r.payment.amount) + ' collected ' + (r.payment.method === 'upi' ? 'by UPI' : 'in cash') + ' · ' + fmtDateTime(r.payment.collectedAt)
+        : fmtINR(r.payment.amount) + ' not collected yet' + (r.payment.riderClaimedAt ? ' (the rider says they paid)' : ''))
+      : 'No payment record (a trip from before payments existed)';
+    page('Trip review', fmtDateTime(r.createdAt) + ' · ' + (r.riderName || '?') + ' → ' + (r.driverName || '?'),
+      el('p', {}, el('button', { class: 'btn small', onclick: () => go('rides') }, '← Back to rides')),
+      el('div', { class: 'card' },
+        el('div', { class: 'muted small' }, 'Payment'),
+        el('p', {}, pay)),
+      el('div', { class: 'card' }, block("Rider's review of the driver", r.review, 'driver')),
+      el('div', { class: 'card' }, block("Driver's review of the rider", r.riderReview, 'rider')));
+  }
+
   // ------------------------------------------------------------------ rides
   async function viewRides() {
     const rides = await api('GET', '/api/admin/rides');
@@ -394,11 +442,11 @@
       el('td', {}, VEHICLES[r.vehicleType] || r.vehicleType),
       el('td', {}, (r.riderName || '?') + (r.driverName ? ' → ' + r.driverName : '')),
       el('td', {}, r.pickup.address + ' → ' + r.dropoff.address),
-      el('td', {}, r.fare ? fmtINR(r.fare.totalFare) : ''),
+      el('td', {}, r.fare ? fmtINR(r.fare.totalFare) + payTag(r) : ''),
       el('td', {}, ACTIVE.includes(r.status) ? el('button', { class: 'btn small danger', onclick: async () => {
         if (!confirm('Cancel this ride?')) return;
         try { await api('PUT', '/api/admin/rides/' + r.id + '/cancel'); toast('Ride cancelled'); go('rides'); } catch (e) { toast(e.message, true); }
-      } }, 'Cancel') : (r.review ? '★ ' + r.review.rating : '')));
+      } }, 'Cancel') : (r.review || r.riderReview ? el('button', { class: 'btn small', onclick: () => viewRideReview(r) }, r.review ? '★ ' + r.review.rating + (r.review.hidden ? ' · hidden' : '') : 'Reviews') : '')));
     filter.addEventListener('change', draw);
     page('Rides', rides.length + ' in total',
       el('div', { class: 'toolbar' }, filter),

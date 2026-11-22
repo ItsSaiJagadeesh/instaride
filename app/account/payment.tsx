@@ -9,11 +9,12 @@ export default function PaymentScreen() {
     <Screen title="Payment">
       <SectionLabel>How you pay</SectionLabel>
       <Card>
-        <MenuRow icon="cash-outline" title="Cash" subtitle="Pay your driver the fare at the end of the trip." right={<Ionicons name="checkmark-circle" size={22} color={Colors.primaryDark} />} last />
+        <MenuRow icon="qr-code-outline" title="UPI" subtitle="After your trip, scan the QR code on your driver's phone with any UPI app. The amount is already filled in. You can also open your UPI app from the trip screen." />
+        <MenuRow icon="cash-outline" title="Cash" subtitle="Or hand your driver the fare. Your driver confirms the payment, and then you can review the trip." last />
       </Card>
-      <SectionLabel>Coming later</SectionLabel>
+      <SectionLabel>Good to know</SectionLabel>
       <Card>
-        <MenuRow icon="phone-portrait-outline" title="UPI and wallet" subtitle="Not available yet. For now please pay in cash." last />
+        <MenuRow icon="shield-checkmark-outline" title="InstaRide never holds your money" subtitle="You pay your driver directly. We only record that the trip was paid." last />
       </Card>
       <SectionLabel>How fares work</SectionLabel>
       <Card>

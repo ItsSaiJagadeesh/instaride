@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Platform,
-  ActivityIndicator, Dimensions, ScrollView, Linking, TextInput,
+  ActivityIndicator, Dimensions, ScrollView, Linking, TextInput, KeyboardAvoidingView,
 } from 'react-native';
 import { router, Redirect } from 'expo-router';
 import MapView, { Marker, PROVIDER_DEFAULT, RouteLine } from '@/components/MapView';
@@ -14,10 +14,12 @@ import { apiRequest } from '@/lib/query-client';
 import Colors from '@/constants/colors';
 import { roleAllowed } from '@/lib/variant';
 import RiderContactCard from '@/components/RiderContactCard';
+import DriverPaymentCard from '@/components/DriverPaymentCard';
+import TripReviewForm from '@/components/TripReviewForm';
 import Animated, { SlideInDown, FadeIn, FadeInUp, FadeInDown } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import type { Ride } from '@shared/schema';
-import { DRIVER_CANCEL_REASONS } from '@shared/schema';
+import { DRIVER_CANCEL_REASONS, RIDER_REVIEW_TAGS } from '@shared/schema';
 
 // A request that is not answered within this time is rejected for this driver (the next driver gets it).
 const REQUEST_SECONDS = 30;
@@ -31,7 +33,7 @@ const { width } = Dimensions.get('window');
 const LATITUDE_DELTA = 0.015;
 const LONGITUDE_DELTA = LATITUDE_DELTA * (width / Dimensions.get('window').height);
 
-type DriverPhase = 'dashboard' | 'online' | 'ride_request' | 'navigating' | 'arrived' | 'in_ride';
+type DriverPhase = 'dashboard' | 'online' | 'ride_request' | 'navigating' | 'arrived' | 'in_ride' | 'payment' | 'rate_rider';
 
 function DriverScreenInner() {
   const insets = useSafeAreaInsets();
@@ -254,8 +256,16 @@ function DriverScreenInner() {
         if (data.status === 'accepted' || data.status === 'arriving') setPhase('navigating');
         else if (data.status === 'arrived') setPhase('arrived');
         else if (data.status === 'in_progress') setPhase('in_ride');
+        else if (data.status === 'completed' && data.payment?.status === 'pending') setPhase('payment'); // finished but not yet paid
       }
     } catch {}
+  };
+
+  // After the payment (and the optional review of the rider): back to the dashboard or to waiting for requests.
+  const finishPaymentFlow = () => {
+    setActiveRide(null);
+    setPhase(isOnline ? 'online' : 'dashboard');
+    if (isOnline) fetchPendingRides();
   };
 
   const fetchRideHistory = async () => {
@@ -332,8 +342,12 @@ function DriverScreenInner() {
       if (status === 'arrived') setPhase('arrived');
       else if (status === 'in_progress') { setPhase('in_ride'); setOtp(''); }
       else if (status === 'completed') {
-        setPhase(isOnline ? 'online' : 'dashboard');
-        setActiveRide(null);
+        if (updated.payment?.status === 'pending') {
+          setPhase('payment'); // collect the money first; the reviews open after that
+        } else {
+          setPhase(isOnline ? 'online' : 'dashboard');
+          setActiveRide(null);
+        }
         fetchRideHistory();
         refreshUser();
         if (updated.fare) {
@@ -816,12 +830,40 @@ function DriverScreenInner() {
           )}
         </Animated.View>
       )}
+      {(phase === 'payment' || phase === 'rate_rider') && activeRide && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[styles.cardFrame, { top: topInset + 64 }]}
+          pointerEvents="box-none"
+        >
+          <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.cardInFrame, { paddingBottom: bottomInset + 16 }]}>
+            <View style={styles.cardHandle} />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll}>
+              {phase === 'payment' ? (
+                <DriverPaymentCard rideId={activeRide.id} onCollected={() => setPhase('rate_rider')} />
+              ) : (
+                <TripReviewForm
+                  title="Rate your rider"
+                  tags={RIDER_REVIEW_TAGS}
+                  endpoint={`/api/rides/${activeRide.id}/rider-review`}
+                  reviewLabel="Review for the rider"
+                  onDone={finishPaymentFlow}
+                />
+              )}
+            </ScrollView>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      )}
       <AppModal {...modalProps} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // The payment and review cards live in a frame that starts under the header, so they can never grow past it on a small phone.
+  cardFrame: { position: 'absolute', left: 0, right: 0, bottom: 0, justifyContent: 'flex-end', zIndex: 5 },
+  cardInFrame: { position: 'relative', bottom: undefined, left: undefined, right: undefined, maxHeight: '100%' },
+  cardScroll: { flexGrow: 0, flexShrink: 1 },
   otpInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
     fontSize: 20, fontFamily: 'Inter_600SemiBold', letterSpacing: 6, textAlign: 'center',
