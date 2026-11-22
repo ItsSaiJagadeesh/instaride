@@ -88,6 +88,7 @@ function DriverScreenInner() {
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
   const bottomInset = Platform.OS === 'web' ? 34 : insets.bottom;
+  const sheetPad = Math.max(bottomInset, 24) + 24; // room under the last item, so it never sits under the phone's navigation buttons
 
   useEffect(() => {
     requestLocation();
@@ -711,134 +712,142 @@ function DriverScreenInner() {
       )}
 
       {phase === 'navigating' && activeRide && (
-        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, { paddingBottom: bottomInset + 16 }]}>
-          {sosPill}
-          <View style={styles.cardHandle} />
-          <View style={styles.rideStatusHeader}>
-            <View style={[styles.statusIndicator, { backgroundColor: Colors.warning }]} />
-            <Text style={styles.cardTitle}>Navigate to Pickup</Text>
-          </View>
-          <Text style={styles.rideAddress} numberOfLines={2}>{activeRide.pickup.address}</Text>
-          <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
+        <SheetFrame top={topInset + 64}>
+          <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.cardInFrame, { paddingBottom: 0 }]}>
+            {sosPill}
+            <View style={styles.cardHandle} />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll} contentContainerStyle={{ paddingBottom: sheetPad }}>
+              <View style={styles.rideStatusHeader}>
+                <View style={[styles.statusIndicator, { backgroundColor: Colors.warning }]} />
+                <Text style={styles.cardTitle}>Navigate to Pickup</Text>
+              </View>
+              <Text style={styles.rideAddress} numberOfLines={2}>{activeRide.pickup.address}</Text>
 
-          <View style={styles.actionRow}>
-            <Pressable
-              style={({ pressed }) => [styles.navBtn, pressed && styles.btnPressed]}
-              onPress={() => openNavigationApp(activeRide.pickup.lat, activeRide.pickup.lng, 'Pickup')}
-            >
-              <Ionicons name="navigate" size={20} color={Colors.textWhite} />
-              <Text style={styles.navBtnText}>Navigate</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.arrivedBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
-              onPress={() => updateRideStatus('arrived')}
-              disabled={loading}
-            >
-              <Ionicons name="flag" size={20} color={Colors.secondary} />
-              <Text style={styles.arrivedBtnText}>I've Arrived</Text>
-            </Pressable>
-          </View>
-          <Pressable
-            style={({ pressed }) => [styles.driverCancelBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
-            onPress={handleDriverCancel}
-            disabled={loading}
-            accessibilityLabel="Cancel this ride"
-          >
-            <Text style={styles.driverCancelText}>Cancel this ride</Text>
-          </Pressable>
-        </Animated.View>
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={({ pressed }) => [styles.navBtn, pressed && styles.btnPressed]}
+                  onPress={() => openNavigationApp(activeRide.pickup.lat, activeRide.pickup.lng, 'Pickup')}
+                >
+                  <Ionicons name="navigate" size={20} color={Colors.textWhite} />
+                  <Text style={styles.navBtnText}>Navigate</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.arrivedBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+                  onPress={() => updateRideStatus('arrived')}
+                  disabled={loading}
+                >
+                  <Ionicons name="flag" size={20} color={Colors.secondary} />
+                  <Text style={styles.arrivedBtnText}>I've Arrived</Text>
+                </Pressable>
+              </View>
+              <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
+              <Pressable
+                style={({ pressed }) => [styles.driverCancelBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+                onPress={handleDriverCancel}
+                disabled={loading}
+                accessibilityLabel="Cancel this ride"
+              >
+                <Text style={styles.driverCancelText}>Cancel this ride</Text>
+              </Pressable>
+            </ScrollView>
+          </Animated.View>
+        </SheetFrame>
       )}
 
       {phase === 'arrived' && activeRide && (
-        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, { paddingBottom: bottomInset + 16 }]}>
-          {sosPill}
-          <View style={styles.cardHandle} />
-          <View style={styles.rideStatusHeader}>
-            <View style={[styles.statusIndicator, { backgroundColor: Colors.primary }]} />
-            <Text style={styles.cardTitle}>Waiting for Rider</Text>
-          </View>
-          <Text style={styles.rideInfo}>
-            {activeRide.riderName || 'Rider'} has been notified of your arrival
-          </Text>
-          <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
-          <TextInput
-            style={styles.otpInput}
-            placeholder="Rider's 4-digit start code"
-            placeholderTextColor={Colors.textLight}
-            value={otp}
-            onChangeText={(t) => setOtp(t.replace(/\D/g, '').slice(0, 4))}
-            keyboardType="number-pad"
-            maxLength={4}
-          />
-          <Pressable
-            style={({ pressed }) => [styles.startRideBtn, pressed && styles.btnPressed, (loading || otp.length !== 4) && styles.btnDisabled]}
-            onPress={() => updateRideStatus('in_progress', otp)}
-            disabled={loading || otp.length !== 4}
-          >
-            <Ionicons name="car" size={20} color={Colors.secondary} />
-            <Text style={styles.startRideBtnText}>Start Ride</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.driverCancelBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
-            onPress={handleDriverCancel}
-            disabled={loading}
-            accessibilityLabel="Cancel this ride"
-          >
-            <Text style={styles.driverCancelText}>Cancel this ride</Text>
-          </Pressable>
-        </Animated.View>
+        <SheetFrame top={topInset + 64}>
+          <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.cardInFrame, { paddingBottom: 0 }]}>
+            {sosPill}
+            <View style={styles.cardHandle} />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll} contentContainerStyle={{ paddingBottom: sheetPad }}>
+              <View style={styles.rideStatusHeader}>
+                <View style={[styles.statusIndicator, { backgroundColor: Colors.primary }]} />
+                <Text style={styles.cardTitle}>Waiting for Rider</Text>
+              </View>
+              <Text style={styles.rideInfo}>
+                {activeRide.riderName || 'Rider'} has been notified of your arrival
+              </Text>
+              <TextInput
+                style={styles.otpInput}
+                placeholder="Rider's 4-digit start code"
+                placeholderTextColor={Colors.textLight}
+                value={otp}
+                onChangeText={(t) => setOtp(t.replace(/\D/g, '').slice(0, 4))}
+                keyboardType="number-pad"
+                maxLength={4}
+              />
+              <Pressable
+                style={({ pressed }) => [styles.startRideBtn, pressed && styles.btnPressed, (loading || otp.length !== 4) && styles.btnDisabled]}
+                onPress={() => updateRideStatus('in_progress', otp)}
+                disabled={loading || otp.length !== 4}
+              >
+                <Ionicons name="car" size={20} color={Colors.secondary} />
+                <Text style={styles.startRideBtnText}>Start Ride</Text>
+              </Pressable>
+              <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
+              <Pressable
+                style={({ pressed }) => [styles.driverCancelBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+                onPress={handleDriverCancel}
+                disabled={loading}
+                accessibilityLabel="Cancel this ride"
+              >
+                <Text style={styles.driverCancelText}>Cancel this ride</Text>
+              </Pressable>
+            </ScrollView>
+          </Animated.View>
+        </SheetFrame>
       )}
 
       {phase === 'in_ride' && activeRide && (
-        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, { paddingBottom: bottomInset + 16 }]}>
-          {sosPill}
-          <View style={styles.cardHandle} />
-          <View style={styles.rideStatusHeader}>
-            <View style={[styles.statusIndicator, { backgroundColor: Colors.success }]} />
-            <Text style={styles.cardTitle}>Ride in Progress</Text>
-          </View>
-          <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
+        <SheetFrame top={topInset + 64}>
+          <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.cardInFrame, { paddingBottom: 0 }]}>
+            {sosPill}
+            <View style={styles.cardHandle} />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll} contentContainerStyle={{ paddingBottom: sheetPad }}>
+              <View style={styles.rideStatusHeader}>
+                <View style={[styles.statusIndicator, { backgroundColor: Colors.success }]} />
+                <Text style={styles.cardTitle}>Ride in Progress</Text>
+              </View>
 
-          <View style={styles.rideDestination}>
-            <Ionicons name="flag" size={18} color={Colors.accent} />
-            <Text style={styles.rideDestText} numberOfLines={2}>{activeRide.dropoff.address}</Text>
-          </View>
+              <View style={styles.rideDestination}>
+                <Ionicons name="flag" size={18} color={Colors.accent} />
+                <Text style={styles.rideDestText} numberOfLines={2}>{activeRide.dropoff.address}</Text>
+              </View>
 
-          <View style={styles.actionRow}>
-            <Pressable
-              style={({ pressed }) => [styles.navBtn, pressed && styles.btnPressed]}
-              onPress={() => openNavigationApp(activeRide.dropoff.lat, activeRide.dropoff.lng, 'Dropoff')}
-            >
-              <Ionicons name="navigate" size={20} color={Colors.textWhite} />
-              <Text style={styles.navBtnText}>Navigate</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.completeBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
-              onPress={() => updateRideStatus('completed')}
-              disabled={loading}
-            >
-              <Ionicons name="checkmark-circle" size={20} color={Colors.secondary} />
-              <Text style={styles.completeBtnText}>Complete Ride</Text>
-            </Pressable>
-          </View>
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={({ pressed }) => [styles.navBtn, pressed && styles.btnPressed]}
+                  onPress={() => openNavigationApp(activeRide.dropoff.lat, activeRide.dropoff.lng, 'Dropoff')}
+                >
+                  <Ionicons name="navigate" size={20} color={Colors.textWhite} />
+                  <Text style={styles.navBtnText}>Navigate</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.completeBtn, pressed && styles.btnPressed, loading && styles.btnDisabled]}
+                  onPress={() => updateRideStatus('completed')}
+                  disabled={loading}
+                >
+                  <Ionicons name="checkmark-circle" size={20} color={Colors.secondary} />
+                  <Text style={styles.completeBtnText}>Complete Ride</Text>
+                </Pressable>
+              </View>
 
-          {activeRide.fare && (
-            <View style={styles.rideEarnings}>
-              <Text style={styles.rideEarningsLabel}>You'll earn</Text>
-              <Text style={styles.rideEarningsValue}>{formatINR(activeRide.fare.driverEarnings)}</Text>
-            </View>
-          )}
-        </Animated.View>
+              {activeRide.fare && (
+                <View style={styles.rideEarnings}>
+                  <Text style={styles.rideEarningsLabel}>You'll earn</Text>
+                  <Text style={styles.rideEarningsValue}>{formatINR(activeRide.fare.driverEarnings)}</Text>
+                </View>
+              )}
+              <RiderContactCard rideId={activeRide.id} status={activeRide.status} />
+            </ScrollView>
+          </Animated.View>
+        </SheetFrame>
       )}
       {(phase === 'payment' || phase === 'rate_rider') && activeRide && (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[styles.cardFrame, { top: topInset + 64 }]}
-          pointerEvents="box-none"
-        >
-          <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.cardInFrame, { paddingBottom: bottomInset + 16 }]}>
+        <SheetFrame top={topInset + 64}>
+          <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.cardInFrame, { paddingBottom: 0 }]}>
             <View style={styles.cardHandle} />
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll} contentContainerStyle={{ paddingBottom: sheetPad }}>
               {phase === 'payment' ? (
                 <DriverPaymentCard rideId={activeRide.id} onCollected={() => setPhase('rate_rider')} />
               ) : (
@@ -852,10 +861,19 @@ function DriverScreenInner() {
               )}
             </ScrollView>
           </Animated.View>
-        </KeyboardAvoidingView>
+        </SheetFrame>
       )}
       <AppModal {...modalProps} />
     </View>
+  );
+}
+
+// Every card at the bottom of the driver's screen lives in a frame that starts under the header, so it can never grow past it on a small phone.
+function SheetFrame({ top, children }: { top: number; children: React.ReactNode }) {
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.cardFrame, { top }]} pointerEvents="box-none">
+      {children}
+    </KeyboardAvoidingView>
   );
 }
 

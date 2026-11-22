@@ -27,6 +27,7 @@ import { startPhoneProof, verifyPhoneProof, OtpError } from "./otp";
 import { SmsError } from "./sms";
 import { buildReadiness, MANUAL_STEPS } from "./readiness";
 import { buildUpiUrl, newPayment, paymentSettled } from "./payments";
+import { encryptText, decryptText } from "./secrets";
 import type { PaymentInfo } from "@shared/schema";
 import {
   otpRequestSchema,
@@ -48,6 +49,9 @@ import {
   DRIVER_CANCEL_REASONS,
   REVIEW_TAGS,
   RIDER_REVIEW_TAGS,
+  MAX_TIP,
+  bankDetailsSchema,
+  phoneChangeSchema,
 } from "@shared/schema";
 import type {
   StoredUser,
@@ -816,13 +820,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       rideId: ride.id,
       status: p.status,
       amount: p.amount,
+      tip: p.tip ?? 0,
+      total: p.amount + (p.tip ?? 0),
       method: p.method,
       collectedAt: p.collectedAt,
       riderClaimedAt: p.riderClaimedAt,
       driverName: ride.driverName,
       hasUpiId: !!driver?.upiId,
       // The link for the QR code carries the driver's UPI ID and the exact fare. Only the rider and the driver of this trip get it, and only while unpaid.
-      upiUrl: p.status === "pending" && driver?.upiId ? buildUpiUrl({ upiId: driver.upiId, payeeName: driver.fullName, amount: p.amount, rideId: ride.id }) : undefined,
+      upiUrl: p.status === "pending" && driver?.upiId ? buildUpiUrl({ upiId: driver.upiId, payeeName: driver.fullName, amount: p.amount + (p.tip ?? 0), rideId: ride.id }) : undefined,
     };
   }
 
@@ -844,6 +850,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!ride || ride.driverId !== req.user!.id || ride.status !== "completed" || !ride.payment) return res.status(404).json({ message: "No payment for this ride" });
     if (ride.payment.status === "collected") return res.status(400).json({ message: "This payment was already marked as collected" });
     const updated = await storage.updateRide(ride.id, { payment: { ...ride.payment, status: "collected", method, collectedAt: new Date().toISOString() } });
+    const tip = ride.payment.tip ?? 0;
+    if (tip > 0) {
+      // A tip is all the driver's: no platform fee. It is counted once, when the payment is collected.
+      const me = req.user!;
+      await storage.updateUser(me.id, { totalEarnings: (me.totalEarnings || 0) + tip, totalTips: (me.totalTips || 0) + tip });
+    }
+    return res.json(await paymentInfoFor(updated!));
+  });
+
+  // The rider adds (or changes, or removes with 0) a tip while the payment is still open. It becomes part of the amount the QR code asks for.
+  app.put("/api/rides/:id/payment/tip", auth, requireRole("rider"), async (req, res) => {
+    const amount = req.body?.amount;
+    if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0 || amount > MAX_TIP) {
+      return res.status(400).json({ message: `A tip is a whole number of rupees, from 0 to ${MAX_TIP}` });
+    }
+    const ride = await storage.getRide(req.params.id as string);
+    if (!ride || ride.riderId !== req.user!.id || ride.status !== "completed" || !ride.payment) return res.status(404).json({ message: "No payment for this ride" });
+    if (ride.payment.status === "collected") return res.status(400).json({ message: "This payment was already collected, so the tip can no longer change" });
+    if (ride.payment.riderClaimedAt) return res.status(400).json({ message: "You already said you paid. Please give any tip to your driver in person" });
+    const updated = await storage.updateRide(ride.id, { payment: { ...ride.payment, tip: amount || undefined } });
     return res.json(await paymentInfoFor(updated!));
   });
 
@@ -1038,6 +1064,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json(toSafeUser(updated!));
   });
 
+  // The admin can read a driver's payout details (to pay them). Every look is written to the audit log.
+  app.get("/api/admin/users/:id/payout", ...adminOnly, async (req, res) => {
+    const u = await storage.getUser(req.params.id as string);
+    if (!u || u.role !== "driver") return res.status(404).json({ message: "Driver not found" });
+    await storage.addAudit({ actorId: req.user!.id, actorName: req.user!.fullName, action: "view_payout_details", entity: `user:${u.id}` });
+    res.setHeader("Cache-Control", "no-store");
+    const account = u.bank ? decryptText(u.bank.accountEnc) : undefined;
+    return res.json({
+      name: u.fullName,
+      upiId: u.upiId ?? null,
+      bank: u.bank ? { holder: u.bank.holder, ifsc: u.bank.ifsc, last4: u.bank.last4, account: account ?? null } : null,
+    });
+  });
+
   app.delete("/api/admin/users/:id", ...adminOnly, async (req, res) => {
     const user = await storage.getUser(req.params.id as string);
     if (!user) return res.status(404).json({ message: "User not found" });
@@ -1142,12 +1182,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fullName: p.fullName,
         ...(p.gender !== undefined ? { gender: p.gender ?? undefined } : {}), // null clears it
         ...(p.upiId !== undefined ? { upiId: p.upiId ?? undefined } : {}), // null clears it
+        ...(p.email !== undefined ? { email: p.email ?? undefined } : {}), // null clears it
       });
       return res.json(toSafeUser(updated!));
     } catch (e) {
       return fail(res, e);
     }
   });
+
+  // A driver's bank account for payouts. The account number is saved encrypted and is never sent back: the apps see the holder, the IFSC and the last 4 digits.
+  app.put("/api/me/bank", auth, requireRole("driver"), async (req, res) => {
+    try {
+      const p = bankDetailsSchema.parse(req.body);
+      const updated = await storage.updateUser(req.user!.id, {
+        bank: { holder: p.holder, ifsc: p.ifsc, last4: p.account.slice(-4), accountEnc: encryptText(p.account) },
+      });
+      return res.json(toSafeUser(updated!));
+    } catch (e) {
+      return fail(res, e);
+    }
+  });
+
+  app.delete("/api/me/bank", auth, requireRole("driver"), async (req, res) => {
+    const updated = await storage.updateUser(req.user!.id, { bank: undefined });
+    return res.json(toSafeUser(updated!));
+  });
+
+  // Changing the mobile number. The person must be signed in AND prove the NEW number with a code sent to it.
+  app.post(
+    "/api/me/phone/request",
+    auth,
+    rateLimit((req) => "phchg:" + req.user!.id, 10, 60 * 60 * 1000),
+    async (req: Request, res: Response) => {
+      try {
+        if (req.user!.role === "admin") return res.status(403).json({ message: "Not available for this account" });
+        const p = otpRequestSchema.parse(req.body);
+        if (p.phone === req.user!.phone) return res.status(400).json({ message: "That is already your number" });
+        if (await storage.getUserByPhone(p.phone, req.user!.role)) return res.status(409).json({ message: "That number already has an InstaRide account" });
+        const out = await startPhoneProof(p.phone);
+        return res.json({ sent: out.mode === "code", ...out });
+      } catch (e) {
+        return codeErrors(res, e);
+      }
+    },
+  );
+
+  app.post(
+    "/api/me/phone/verify",
+    auth,
+    rateLimit((req) => "phchgver:" + req.user!.id, 20, 15 * 60 * 1000),
+    async (req: Request, res: Response) => {
+      try {
+        const me = req.user!;
+        if (me.role === "admin") return res.status(403).json({ message: "Not available for this account" });
+        const p = phoneChangeSchema.parse(req.body);
+        if (p.phone === me.phone) return res.status(400).json({ message: "That is already your number" });
+        if (await storage.getUserByPhone(p.phone, me.role)) return res.status(409).json({ message: "That number already has an InstaRide account" });
+        await verifyPhoneProof(p.phone, { otp: p.otp, idToken: p.idToken });
+        const updated = await storage.changeUserPhone(me.id, p.phone);
+        if (!updated) return res.status(409).json({ message: "That number already has an InstaRide account" });
+        await storage.addAudit({
+          actorId: me.id,
+          actorName: me.fullName,
+          action: "change_phone",
+          entity: `user:${me.id}`,
+          before: "****" + me.phone.slice(-4),
+          after: "****" + p.phone.slice(-4),
+        });
+        return res.json(toSafeUser(updated));
+      } catch (e) {
+        return codeErrors(res, e);
+      }
+    },
+  );
 
   app.put("/api/me/emergency-contact", auth, async (req, res) => {
     try {

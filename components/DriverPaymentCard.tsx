@@ -43,7 +43,7 @@ export default function DriverPaymentCard({ rideId, onCollected }: { rideId: str
     if (!info) return;
     showConfirm(
       'Payment received?',
-      `Mark ${formatINR(info.amount)} as collected ${method === 'cash' ? 'in cash' : 'by UPI'}? You cannot undo this.`,
+      `Mark ${formatINR(info.total)} as collected ${method === 'cash' ? 'in cash' : 'by UPI'}? You cannot undo this.`,
       async () => {
         setBusy(method);
         try {
@@ -78,7 +78,8 @@ export default function DriverPaymentCard({ rideId, onCollected }: { rideId: str
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Collect payment</Text>
-      <Text style={styles.amount} accessibilityLabel="Amount to collect">{formatINR(info.amount)}</Text>
+      <Text style={styles.amount} accessibilityLabel="Amount to collect">{formatINR(info.total)}</Text>
+      {info.tip > 0 && <Text style={styles.tipNote} accessibilityLabel="Fare and tip">Fare {formatINR(info.amount)} + tip {formatINR(info.tip)}. The whole tip is yours.</Text>}
 
       {!!info.riderClaimedAt && (
         <View style={styles.claim} accessibilityLabel="The rider says they have paid">
@@ -146,6 +147,7 @@ const styles = StyleSheet.create({
   wrap: { alignItems: 'center', paddingBottom: 8 },
   title: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.text, marginBottom: 2 },
   amount: { fontSize: 40, fontFamily: 'Inter_700Bold', color: Colors.primary, marginBottom: 10 },
+  tipNote: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.success, marginBottom: 8, textAlign: 'center' },
   claim: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#E8FBF5', borderRadius: 12, padding: 10, marginBottom: 10, alignSelf: 'stretch' },
   claimText: { flex: 1, fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.text },
   qrBox: { alignItems: 'center', gap: 8, marginBottom: 12 },

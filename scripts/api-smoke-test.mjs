@@ -275,6 +275,23 @@ async function approve(adminToken, driver) {
   const upi = new URL(payR.data.upiUrl || "x:");
   check("the rider gets a UPI link with the driver's ID and the exact fare filled in", upi.protocol === "upi:" && upi.searchParams.get("pa") === "sai.driver@okbank" && upi.searchParams.get("am") === FARE.toFixed(2) && upi.searchParams.get("cu") === "INR" && /^[A-Za-z0-9]{1,35}$/.test(upi.searchParams.get("tr") || ""), payR.data.upiUrl);
   check("the driver gets the very same link for the QR code", payD.data.upiUrl === payR.data.upiUrl && payD.data.hasUpiId === true);
+  console.log("Tips");
+  const TIP = `/api/rides/${ride.data.id}/payment/tip`;
+  for (const bad of [-1, 501, 12.5, "20", null, undefined]) {
+    check(`a tip of ${JSON.stringify(bad)} is refused (whole rupees, 0 to 500)`, (await call("PUT", TIP, { token: RT, body: { amount: bad } })).status === 400);
+  }
+  check("a driver cannot add a tip", (await call("PUT", TIP, { token: winner.token, body: { amount: 20 } })).status === 403);
+  check("another rider cannot tip on this trip", (await call("PUT", TIP, { token: other.token, body: { amount: 20 } })).status === 404);
+  check("a signed-out visitor cannot tip", (await call("PUT", TIP, { body: { amount: 20 } })).status === 401);
+  const tipped = await call("PUT", TIP, { token: RT, body: { amount: 20 } });
+  check("the rider adds a Rs 20 tip: the fare stays, the total grows", tipped.status === 200 && tipped.data.amount === FARE && tipped.data.tip === 20 && tipped.data.total === FARE + 20, JSON.stringify(tipped.data));
+  const tippedD = await call("GET", PAY, { token: winner.token });
+  check("the driver's QR link now asks for fare + tip", new URL(tippedD.data.upiUrl).searchParams.get("am") === (FARE + 20).toFixed(2) && tippedD.data.tip === 20 && tippedD.data.total === FARE + 20, JSON.stringify(tippedD.data));
+  check("the rider's own link asks for the same total", new URL((await call("GET", PAY, { token: RT })).data.upiUrl).searchParams.get("am") === (FARE + 20).toFixed(2));
+  check("the tip can be changed", (await call("PUT", TIP, { token: RT, body: { amount: 50 } })).data.total === FARE + 50);
+  const noTip = await call("PUT", TIP, { token: RT, body: { amount: 0 } });
+  check("and removed with 0, which puts the link back to the plain fare", noTip.data.tip === 0 && noTip.data.total === FARE && new URL(noTip.data.upiUrl).searchParams.get("am") === FARE.toFixed(2), JSON.stringify(noTip.data));
+  await call("PUT", TIP, { token: RT, body: { amount: 20 } }); // leave a Rs 20 tip in place for the payment steps below
   check("the payment answer is marked do-not-store", ((await fetch(BASE + PAY, { headers: { Authorization: "Bearer " + RT } })).headers.get("cache-control") || "").includes("no-store"));
   check("another rider cannot see the payment", (await call("GET", PAY, { token: other.token })).status === 404);
   check("another driver cannot see the payment", (await call("GET", PAY, { token: loser.token })).status === 404);
@@ -285,12 +302,18 @@ async function approve(adminToken, driver) {
   const claim = await call("PUT", PAY + "/claim", { token: RT });
   check("the rider can tell the driver they have paid", claim.status === 200 && !!claim.data.riderClaimedAt, JSON.stringify(claim.data));
   check("the driver sees that the rider says they paid", !!(await call("GET", PAY, { token: winner.token })).data.riderClaimedAt);
+  check("after the rider says they paid, the tip can no longer change", (await call("PUT", TIP, { token: RT, body: { amount: 100 } })).status === 400);
   check("a rider cannot mark the money as collected", (await call("PUT", PAY + "/collect", { token: RT, body: { method: "cash" } })).status === 403);
   check("another driver cannot mark it collected", (await call("PUT", PAY + "/collect", { token: loser.token, body: { method: "cash" } })).status === 404);
   check("collecting needs cash or UPI", (await call("PUT", PAY + "/collect", { token: winner.token, body: { method: "card" } })).status === 400);
+  const earnBefore = (await call("GET", "/api/me", { token: winner.token })).data;
   const collected = await call("PUT", PAY + "/collect", { token: winner.token, body: { method: "upi" } });
   check("the driver confirms the payment was collected by UPI", collected.status === 200 && collected.data.status === "collected" && collected.data.method === "upi" && !!collected.data.collectedAt && collected.data.upiUrl === undefined, JSON.stringify(collected.data));
   check("it cannot be collected twice", (await call("PUT", PAY + "/collect", { token: winner.token, body: { method: "cash" } })).status === 400);
+  const earnAfter = (await call("GET", "/api/me", { token: winner.token })).data;
+  check("the Rs 20 tip joined the driver's earnings, with no platform fee on it", earnAfter.totalEarnings === (earnBefore.totalEarnings || 0) + 20 && earnAfter.totalTips === (earnBefore.totalTips || 0) + 20 && earnAfter.feesDue === earnBefore.feesDue, JSON.stringify([earnBefore.totalEarnings, earnAfter.totalEarnings, earnAfter.totalTips]));
+  check("once collected, the tip can no longer change", (await call("PUT", TIP, { token: RT, body: { amount: 100 } })).status === 400);
+  check("the collected payment keeps the tip on record", (await call("GET", `/api/rides/${ride.data.id}`, { token: RT })).data.payment?.tip === 20);
   check("once collected, the rider can no longer say 'I paid'", (await call("PUT", PAY + "/claim", { token: RT })).status === 400);
   const paidPage = await call("GET", PAY, { token: RT });
   check("once collected, the page shows it as paid and the QR link is gone", paidPage.data.status === "collected" && paidPage.data.method === "upi" && paidPage.data.upiUrl === undefined);
@@ -361,6 +384,60 @@ async function approve(adminToken, driver) {
   check("hiding the driver's review of the rider leaves the rider's review of the driver alone", (await call("GET", "/api/driver/reviews", { token: winner.token })).data.items[0].text === "Very polite and on time.");
   await call("PUT", HIDE_URL, { token: AT, body: { hidden: false, which: "rider" } });
   check("the admin can show it again", (await call("GET", "/api/rider/reviews", { token: RT })).data.items[0].text === "Ready on time, paid quickly.");
+
+  console.log("Profile: email, payout details, and changing the mobile number");
+  const emailOk = await call("PUT", "/api/me", { token: RT, body: { fullName: meRider.data.fullName, email: "  Rider@Example.COM " } });
+  check("a rider saves an email (tidied to lower case)", emailOk.status === 200 && emailOk.data.email === "rider@example.com", JSON.stringify(emailOk.data));
+  check("a wrong email is refused", (await call("PUT", "/api/me", { token: RT, body: { fullName: meRider.data.fullName, email: "not-an-email" } })).status === 400);
+  check("the email can be cleared", (await call("PUT", "/api/me", { token: RT, body: { fullName: meRider.data.fullName, email: null } })).data.email === undefined);
+  check("another rider cannot read someone else's profile", (await call("GET", `/api/user/${RID}`, { token: other.token })).status === 403);
+
+  for (const bad of [{ holder: "A", account: "123456789", ifsc: "SBIN0001234" }, { holder: "Sai Kumar", account: "12345", ifsc: "SBIN0001234" }, { holder: "Sai Kumar", account: "123456789012", ifsc: "SBIN1001234" }, { holder: "Sai Kumar", account: "12345678901x", ifsc: "SBIN0001234" }]) {
+    check(`bad bank details are refused: ${JSON.stringify(bad)}`, (await call("PUT", "/api/me/bank", { token: winner.token, body: bad })).status === 400);
+  }
+  check("a rider cannot save bank details", (await call("PUT", "/api/me/bank", { token: RT, body: { holder: "Sai Kumar", account: "123456789012", ifsc: "SBIN0001234" } })).status === 403);
+  const bank = await call("PUT", "/api/me/bank", { token: winner.token, body: { holder: "Sai Kumar", account: "123456789012", ifsc: "sbin0001234" } });
+  check("a driver saves bank details, and the IFSC is tidied to capitals", bank.status === 200 && bank.data.bank?.ifsc === "SBIN0001234" && bank.data.bank?.last4 === "9012", JSON.stringify(bank.data.bank));
+  check("the full account number and the encrypted copy are never sent back", !JSON.stringify(bank.data).includes("123456789012") && !JSON.stringify(bank.data).includes("accountEnc"));
+  const meBank = await call("GET", "/api/me", { token: winner.token });
+  check("the driver's profile shows only the last 4 digits", meBank.data.bank?.last4 === "9012" && meBank.data.bank?.accountEnc === undefined && !JSON.stringify(meBank.data).includes("123456789012"));
+  const adminPeople = JSON.stringify((await call("GET", "/api/admin/users", { token: AT })).data);
+  check("the admin's people list does not carry the account number either", !adminPeople.includes("123456789012") && !adminPeople.includes("accountEnc"));
+  check("a rider cannot open the admin payout view", (await call("GET", `/api/admin/users/${winner.user.id}/payout`, { token: RT })).status === 403);
+  check("a driver cannot open it either", (await call("GET", `/api/admin/users/${winner.user.id}/payout`, { token: winner.token })).status === 403);
+  const payout = await call("GET", `/api/admin/users/${winner.user.id}/payout`, { token: AT });
+  check("the admin can read the full payout details", payout.status === 200 && payout.data.bank?.account === "123456789012" && payout.data.bank?.holder === "Sai Kumar" && payout.data.upiId === "sai.driver@okbank", JSON.stringify(payout.data));
+  check("the payout answer is marked do-not-store", ((await fetch(BASE + `/api/admin/users/${winner.user.id}/payout`, { headers: { Authorization: "Bearer " + AT } })).headers.get("cache-control") || "").includes("no-store"));
+  const auditList = (await call("GET", "/api/admin/audit", { token: AT })).data;
+  const auditArr = Array.isArray(auditList) ? auditList : auditList?.entries || [];
+  check("that look at payout details is written to the audit log", auditArr.some((a) => a.action === "view_payout_details" && a.entity === `user:${winner.user.id}`), JSON.stringify(auditArr.slice(0, 2)));
+  check("a driver can remove their bank details", (await call("DELETE", "/api/me/bank", { token: winner.token })).data.bank === undefined);
+
+  const mover = await otpSignup("rider", "Phone Changer");
+  const NEWP = phone();
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  check("a signed-out visitor cannot ask to change a number", (await call("POST", "/api/me/phone/request", { body: { phone: NEWP } })).status === 401);
+  check("the admin cannot change a number here", (await call("POST", "/api/me/phone/request", { token: AT, body: { phone: NEWP } })).status === 403);
+  check("asking for the number you already have is refused", (await call("POST", "/api/me/phone/request", { token: mover.token, body: { phone: mover.user.phone } })).status === 400);
+  check("a number that already has a rider account is refused", (await call("POST", "/api/me/phone/request", { token: mover.token, body: { phone: meRider.data.phone } })).status === 409);
+  const reqCode = await call("POST", "/api/me/phone/request", { token: mover.token, body: { phone: NEWP } });
+  check("a code is requested for the NEW number", reqCode.status === 200 && reqCode.data.mode === "code", JSON.stringify(reqCode));
+  check("a wrong code is refused", (await call("POST", "/api/me/phone/verify", { token: mover.token, body: { phone: NEWP, otp: "000000" } })).status === 400);
+  check("after a wrong code the account still has its old number", (await call("GET", "/api/me", { token: mover.token })).data.phone === mover.user.phone);
+  const changed = await call("POST", "/api/me/phone/verify", { token: mover.token, body: { phone: NEWP, otp: "123456" } });
+  check("with the right code the account moves to the new number", changed.status === 200 && changed.data.phone === NEWP && changed.data.id === mover.user.id, JSON.stringify(changed.data));
+  check("the same session keeps working", (await call("GET", "/api/me", { token: mover.token })).data.phone === NEWP);
+  await wait(1300);
+  await call("POST", "/api/auth/otp/request", { body: { phone: NEWP } });
+  const viaNew = await call("POST", "/api/auth/otp/verify", { body: { phone: NEWP, otp: "123456", role: "rider" } });
+  check("signing in with the new number reaches the same account", viaNew.status === 200 && viaNew.data.user?.id === mover.user.id, JSON.stringify(viaNew.data));
+  await call("POST", "/api/auth/otp/request", { body: { phone: mover.user.phone } });
+  const viaOld = await call("POST", "/api/auth/otp/verify", { body: { phone: mover.user.phone, otp: "123456", role: "rider" } });
+  check("the old number no longer reaches it (it would start a new account)", viaOld.status === 200 && viaOld.data.needsSignup === true, JSON.stringify(viaOld.data));
+  check("the new number is now taken", (await call("POST", "/api/me/phone/request", { token: other.token, body: { phone: NEWP } })).status === 409);
+  const audit2 = (await call("GET", "/api/admin/audit", { token: AT })).data;
+  const audit2Arr = Array.isArray(audit2) ? audit2 : audit2?.entries || [];
+  check("the change is in the audit log, with the numbers hidden", audit2Arr.some((a) => a.action === "change_phone" && a.entity === `user:${mover.user.id}` && !JSON.stringify(a).includes(NEWP) && !JSON.stringify(a).includes(mover.user.phone)));
 
   console.log("Driver cancel returns ride to searching");
   const ride2 = await call("POST", "/api/rides", { token: RT, body: { vehicleType: "bike", pickup, dropoff: drop } });

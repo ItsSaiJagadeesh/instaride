@@ -7,7 +7,7 @@ import AppModal, { useAppModal } from '@/components/AppModal';
 import { useAuth } from '@/lib/auth-context';
 import { apiRequest } from '@/lib/query-client';
 import Colors from '@/constants/colors';
-import { UPI_ID_RE, type Gender } from '@shared/schema';
+import type { Gender } from '@shared/schema';
 
 const GENDERS: { value: Gender | null; label: string }[] = [
   { value: 'male', label: 'Male' },
@@ -16,23 +16,24 @@ const GENDERS: { value: Gender | null; label: string }[] = [
   { value: null, label: 'Prefer not to say' },
 ];
 
+const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
 export default function EditProfileScreen() {
   const { user, refreshUser } = useAuth();
   const { showAlert, modalProps } = useAppModal();
   const [name, setName] = useState(user?.fullName ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
   const [gender, setGender] = useState<Gender | null>((user?.gender as Gender | undefined) ?? null);
-  const [upi, setUpi] = useState(user?.upiId ?? ''); // drivers only
   const [saving, setSaving] = useState(false);
-  const isDriver = user?.role === 'driver';
+
+  const emailClean = email.trim();
+  const emailBad = emailClean !== '' && !EMAIL_OK.test(emailClean);
+  const unchanged = name.trim() === user?.fullName && gender === ((user?.gender as Gender | undefined) ?? null) && emailClean === (user?.email ?? '');
 
   const save = async () => {
-    if (isDriver && upi.trim() && !UPI_ID_RE.test(upi.trim())) {
-      showAlert('Check your UPI ID', 'A UPI ID looks like yourname@bank. You can leave it empty to take cash only.');
-      return;
-    }
     setSaving(true);
     try {
-      await apiRequest('PUT', '/api/me', { fullName: name.trim(), gender, ...(isDriver ? { upiId: upi.trim() || null } : {}) });
+      await apiRequest('PUT', '/api/me', { fullName: name.trim(), gender, email: emailClean || null });
       await refreshUser();
       router.back();
     } catch (e: any) {
@@ -46,10 +47,23 @@ export default function EditProfileScreen() {
     <Screen title="Edit profile">
       <Field label="Full name" value={name} onChangeText={setName} autoCapitalize="words" maxLength={80} />
       <Field
+        label="Email (optional)"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        maxLength={120}
+        placeholder="you@example.com"
+        hint="Only used to contact you about your account. It is not shown to anyone else."
+        accessibilityLabel="Email"
+      />
+      {emailBad && <Text style={{ color: Colors.error, fontFamily: 'Inter_500Medium', fontSize: 13, marginBottom: 8 }}>Enter a valid email address</Text>}
+      <Field
         label="Mobile number"
         value={user?.phone ?? ''}
         editable={false}
-        hint="Your number is how you sign in. Changing it is not available yet."
+        hint="Your number is how you sign in. To change it, go back and open Mobile number."
       />
       <Text style={styles.label}>Gender (optional)</Text>
       <Text style={styles.hint}>Used only so a driver can greet you properly. It is never shown to anyone.</Text>
@@ -67,24 +81,7 @@ export default function EditProfileScreen() {
           </Pressable>
         ))}
       </View>
-      {isDriver && (
-        <Field
-          label="UPI ID (to receive fares)"
-          value={upi}
-          onChangeText={setUpi}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="yourname@bank"
-          maxLength={80}
-          hint="Riders pay you directly by UPI, and the app shows them a QR code with the fare filled in. We never hold your money. Leave it empty to take cash only."
-        />
-      )}
-      <PrimaryButton
-        title="Save"
-        onPress={save}
-        loading={saving}
-        disabled={name.trim().length < 2 || (name.trim() === user?.fullName && gender === ((user?.gender as Gender | undefined) ?? null) && (!isDriver || upi.trim() === (user?.upiId ?? '')))}
-      />
+      <PrimaryButton title="Save" onPress={save} loading={saving} disabled={name.trim().length < 2 || emailBad || unchanged} />
       <AppModal {...modalProps} />
     </Screen>
   );

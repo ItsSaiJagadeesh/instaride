@@ -1,26 +1,21 @@
 /* InstaRide: a fork of RideFlow (GPL-3.0-or-later). InstaRider profile tab. */
 import React from 'react';
-import { View, Text } from 'react-native';
 import { router } from 'expo-router';
 import { Screen, Card, MenuRow, SectionLabel } from '@/components/ui';
 import { useAuth } from '@/lib/auth-context';
-import Colors from '@/constants/colors';
+import ProfileHeader from '@/components/ProfileHeader';
 
 export default function ProfileTab() {
   const { user } = useAuth();
-  const initial = (user?.fullName || '?').trim().charAt(0).toUpperCase();
   return (
     <Screen title="Profile" back={false}>
+      <ProfileHeader />
+
+      <SectionLabel>Your details</SectionLabel>
       <Card>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 }}>
-          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 24, color: Colors.secondary }}>{initial}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 18, color: Colors.text }}>{user?.fullName}</Text>
-            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, color: Colors.textLight }}>{user?.phone}</Text>
-          </View>
-        </View>
+        <MenuRow icon="person-outline" title="Edit profile" subtitle={user?.email ? `${user.fullName} · ${user.email}` : 'Name, email and gender'} onPress={() => router.push('/account/edit-profile')} />
+        <MenuRow icon="call-outline" title="Mobile number" subtitle={user?.phone} onPress={() => router.push('/account/change-phone')} />
+        <MenuRow icon="star-outline" title="My reviews" subtitle="What drivers said about you" onPress={() => router.push('/account/my-reviews')} last />
       </Card>
 
       <SectionLabel>Your places and safety</SectionLabel>

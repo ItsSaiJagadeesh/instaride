@@ -84,17 +84,31 @@ export interface StoredUser {
   verification?: DriverVerification & { files: Partial<Record<DocumentKind, string>> };
   rating?: number;
   totalRides?: number;
-  totalEarnings?: number; // rupees earned by an InstaDriver (fare minus platform fee)
+  totalEarnings?: number; // rupees earned by an InstaDriver (fare minus platform fee, plus tips)
+  totalTips?: number; // rupees of tips an InstaDriver has received (already included in totalEarnings)
   feesDue?: number; // rupees of platform fee the driver has not paid yet
   emergencyContact?: EmergencyContact;
   favourites?: Favourite[];
   gender?: Gender;
   upiId?: string; // a driver's UPI ID, used for the payment QR. Only the owner and the admin ever see it as such
+  email?: string; // optional, not verified. Only the owner and the admin see it.
+  bank?: StoredBank; // a driver's bank account for payouts (the account number is saved encrypted)
+}
+
+/** What the owner and the admin list see of a bank account: never the full number. */
+export interface BankDetails {
+  holder: string;
+  ifsc: string;
+  last4: string;
+}
+export interface StoredBank extends BankDetails {
+  accountEnc: string; // the account number, encrypted on the server
 }
 
 /** What the apps receive: no password hash, no file names. */
-export type User = Omit<StoredUser, 'passwordHash' | 'verification'> & {
+export type User = Omit<StoredUser, 'passwordHash' | 'verification' | 'bank'> & {
   verification?: DriverVerification;
+  bank?: BankDetails;
 };
 
 export interface RateCard {
@@ -135,9 +149,13 @@ export interface TripReview<T extends string = string> {
 }
 
 /** Money for a finished trip. UPI cannot tell us a payment arrived, so the driver confirms it (cash or UPI). */
+/** The most a rider can add as a tip for one trip, in whole rupees. */
+export const MAX_TIP = 500;
+
 export interface RidePayment {
   status: 'pending' | 'collected';
   amount: number; // rupees, the trip's total fare
+  tip?: number; // whole rupees the rider added as a thank-you. It all goes to the driver (no platform fee).
   method?: 'cash' | 'upi';
   collectedAt?: string;
   riderClaimedAt?: string; // the rider tapped "I have paid"
@@ -147,7 +165,9 @@ export interface RidePayment {
 export interface PaymentInfo {
   rideId: string;
   status: 'pending' | 'collected';
-  amount: number;
+  amount: number; // the fare
+  tip: number; // 0 if none
+  total: number; // fare + tip: what the QR code and the UPI link ask for
   method?: 'cash' | 'upi';
   collectedAt?: string;
   riderClaimedAt?: string;
@@ -359,6 +379,23 @@ export const updateProfileSchema = z.object({
   fullName: z.string().trim().min(2).max(80),
   gender: z.enum(['male', 'female', 'other']).nullable().optional(), // null clears it
   upiId: z.string().trim().regex(UPI_ID_RE, 'Enter a UPI ID like name@bank').nullable().optional(), // drivers only; null clears it
+  email: z.string().trim().toLowerCase().email('Enter a valid email address').max(120).nullable().optional(), // null clears it
+});
+
+/** Changing the mobile number: the new number and the proof that it belongs to the person (the 6-digit code, or Firebase's signed proof). */
+export const phoneChangeSchema = z
+  .object({
+    phone: phoneSchema,
+    otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
+    idToken: z.string().min(100).max(5000).optional(),
+  })
+  .refine((v) => !!(v.otp || v.idToken), { message: 'Enter the 6-digit code', path: ['otp'] });
+
+/** A driver's bank account for payouts. */
+export const bankDetailsSchema = z.object({
+  holder: z.string().trim().min(2, 'Enter the name on the account').max(80),
+  account: z.string().trim().regex(/^\d{9,18}$/, 'An account number is 9 to 18 digits'),
+  ifsc: z.string().trim().toUpperCase().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'An IFSC code looks like SBIN0001234'),
 });
 
 /** What the assigned driver may see about the rider of a live ride (from GET /api/rides/:id/rider-contact). */

@@ -906,8 +906,10 @@ function RiderScreenInner() {
       )}
 
       {(phase === 'matched' || phase === 'riding') && activeRide && (
-        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, { paddingBottom: bottomInset + 16 }]}>
+        <View style={[styles.dropoffFrame, { top: topInset + 64, bottom: 0 }]} pointerEvents="box-none">
+        <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.dropoffCard, { paddingBottom: 0 }]}>
           <View style={styles.cardHandle} />
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll} contentContainerStyle={{ paddingBottom: Math.max(bottomInset, 24) + 24 }}>
 
           <View style={styles.rideStatusBar}>
             <View style={[styles.rideStatusDot, { backgroundColor: phase === 'riding' ? Colors.primary : Colors.warning }]} />
@@ -987,7 +989,9 @@ function RiderScreenInner() {
               <Text style={styles.cancelRideBtnText}>Cancel Ride</Text>
             </Pressable>
           )}
+          </ScrollView>
         </Animated.View>
+        </View>
       )}
 
       {phase === 'completed' && activeRide && (

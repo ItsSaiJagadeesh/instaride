@@ -380,8 +380,9 @@
   // How a trip was paid: shown next to the fare. Trips from before payments existed show nothing.
   function payTag(r) {
     if (!r.payment) return '';
-    if (r.payment.status === 'collected') return ' · ' + (r.payment.method === 'upi' ? 'UPI' : 'cash');
-    return ' · unpaid';
+    const tip = r.payment.tip ? ' + ' + fmtINR(r.payment.tip) + ' tip' : '';
+    if (r.payment.status === 'collected') return ' · ' + (r.payment.method === 'upi' ? 'UPI' : 'cash') + tip;
+    return ' · unpaid' + tip;
   }
 
   // ------------------------------------------------------------------ one trip's review
@@ -413,7 +414,7 @@
     };
     const pay = r.payment
       ? (r.payment.status === 'collected'
-        ? fmtINR(r.payment.amount) + ' collected ' + (r.payment.method === 'upi' ? 'by UPI' : 'in cash') + ' · ' + fmtDateTime(r.payment.collectedAt)
+        ? fmtINR(r.payment.amount + (r.payment.tip || 0)) + (r.payment.tip ? ' (fare ' + fmtINR(r.payment.amount) + ' + tip ' + fmtINR(r.payment.tip) + ')' : '') + ' collected ' + (r.payment.method === 'upi' ? 'by UPI' : 'in cash') + ' · ' + fmtDateTime(r.payment.collectedAt)
         : fmtINR(r.payment.amount) + ' not collected yet' + (r.payment.riderClaimedAt ? ' (the rider says they paid)' : ''))
       : 'No payment record (a trip from before payments existed)';
     page('Trip review', fmtDateTime(r.createdAt) + ' · ' + (r.riderName || '?') + ' → ' + (r.driverName || '?'),
@@ -456,6 +457,18 @@
   }
 
   // ------------------------------------------------------------------ users
+  // A driver's payout details, to pay them. Opening this is written to the audit log with your name.
+  async function showPayout(u) {
+    try {
+      const d = await api('GET', '/api/admin/users/' + u.id + '/payout');
+      const lines = ['Payout details for ' + d.name, '', 'UPI ID: ' + (d.upiId || 'not added')];
+      if (d.bank) lines.push('Bank account holder: ' + d.bank.holder, 'Account number: ' + (d.bank.account || 'cannot be read (ask the driver to enter it again)'), 'IFSC: ' + d.bank.ifsc);
+      else lines.push('Bank account: not added');
+      lines.push('', 'This look was recorded in the audit log.');
+      alert(lines.join('\n'));
+    } catch (e) { toast(e.message, true); }
+  }
+
   async function viewUsers() {
     const users = await api('GET', '/api/admin/users');
     const role = el('select', { class: 'input' }, [['all', 'Everyone'], ['driver', 'InstaDrivers'], ['rider', 'InstaRiders']].map(([v, l]) => el('option', { value: v }, l)));
@@ -479,6 +492,7 @@
             if (confirm('Mark ' + fmtINR(due) + ' as paid by ' + u.fullName + '? Only do this after you have received the money.'))
               act(() => api('POST', '/api/admin/drivers/' + u.id + '/settle', { amount: due }), 'Payment recorded');
           } }, 'Mark paid') : null, ' ',
+          u.role === 'driver' ? el('button', { class: 'btn small', onclick: () => showPayout(u) }, 'Payout') : null, ' ',
           el('button', { class: 'btn small warn', onclick: () => act(() => api('PUT', '/api/admin/users/' + u.id + '/suspend'), u.suspended ? 'Account restored' : 'Account suspended') }, u.suspended ? 'Restore' : 'Suspend'), ' ',
           el('button', { class: 'btn small danger', onclick: () => {
             if (confirm('Remove ' + u.fullName + ' permanently? Their documents are deleted too.'))

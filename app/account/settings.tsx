@@ -5,15 +5,28 @@ import { Screen, Card, MenuRow, SectionLabel } from '@/components/ui';
 import AppModal, { useAppModal } from '@/components/AppModal';
 import { useAuth } from '@/lib/auth-context';
 import { goToWelcome } from '@/lib/nav';
+import ProfileHeader from '@/components/ProfileHeader';
 
 export default function SettingsScreen() {
   const { user, logout } = useAuth();
   const { showConfirm, modalProps } = useAppModal();
   return (
     <Screen title="Settings">
+      <ProfileHeader />
+
       <SectionLabel>Account</SectionLabel>
       <Card>
-        <MenuRow icon="person-outline" title="Edit profile" subtitle={`${user?.fullName ?? ''} · ${user?.phone ?? ''}`} onPress={() => router.push('/account/edit-profile')} last />
+        <MenuRow icon="person-outline" title="Edit profile" subtitle={user?.email ? `${user.fullName} · ${user.email}` : 'Name, email and gender'} onPress={() => router.push('/account/edit-profile')} />
+        <MenuRow icon="call-outline" title="Mobile number" subtitle={user?.phone} onPress={() => router.push('/account/change-phone')} last={user?.role !== 'driver'} />
+        {user?.role === 'driver' && (
+          <MenuRow
+            icon="card-outline"
+            title="Payout details"
+            subtitle={user?.bank ? `UPI and bank account ending ${user.bank.last4}` : user?.upiId ? `UPI: ${user.upiId}` : 'Add your UPI ID or bank account'}
+            onPress={() => router.push('/account/payout')}
+            last
+          />
+        )}
       </Card>
 
       <SectionLabel>Reviews</SectionLabel>

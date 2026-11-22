@@ -129,6 +129,21 @@ export class RedisStorage {
     return newUser;
   }
 
+  /**
+   * Moves an account to a new phone number. The new number is claimed first (atomically, so two people cannot take it),
+   * then the account is updated, then the old number is released. Returns undefined if the new number already has an account.
+   */
+  async changeUserPhone(id: string, newPhone: string): Promise<StoredUser | undefined> {
+    const user = await this.getUser(id);
+    if (!user) return undefined;
+    if (user.phone === newPhone) return user;
+    const claimed = await this.redis.hsetnx(P + "phones", phoneKey(user.role, newPhone), id);
+    if (!claimed) return undefined;
+    const updated: StoredUser = { ...user, phone: newPhone };
+    await this.redis.hset(P + "users", id, JSON.stringify(updated));
+    await this.redis.hdel(P + "phones", phoneKey(user.role, user.phone));
+    return updated;
+  }
   async updateUser(id: string, updates: Partial<StoredUser>): Promise<StoredUser | undefined> {
     const user = await this.getUser(id);
     if (!user) return undefined;

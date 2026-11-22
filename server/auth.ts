@@ -141,10 +141,12 @@ export function requireSelfOrAdmin(paramName: string) {
 }
 
 export function toSafeUser(u: StoredUser): User {
-  const { passwordHash: _ph, verification, ...rest } = u;
-  if (!verification) return rest;
+  const { passwordHash: _ph, verification, bank, ...rest } = u;
+  // The encrypted account number never leaves the server: the apps and the admin list see the holder, the IFSC and the last 4 digits.
+  const withBank = bank ? { ...rest, bank: { holder: bank.holder, ifsc: bank.ifsc, last4: bank.last4 } } : rest;
+  if (!verification) return withBank;
   const { files, ...v } = verification;
-  return { ...rest, verification: { ...v, uploaded: Object.keys(files) as any } };
+  return { ...withBank, verification: { ...v, uploaded: Object.keys(files) as any } };
 }
 
 // ---- simple in-memory rate limiter (per process; enough for a single-server pilot) ----

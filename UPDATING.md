@@ -105,3 +105,21 @@ Server: `PUT /api/rides/:id/rider-review`, `GET /api/rider/reviews`; the earlier
 
 Needs a **server update** and a new app build. Run `npm install` once (new package `qrcode-generator`, pure JavaScript). No database change: all new fields are optional.
 New files: `server/payments.ts`, `components/UpiQr.tsx`, `components/DriverPaymentCard.tsx`, `components/RiderPaymentCard.tsx`, `components/TripReviewForm.tsx`, `scripts/payments-test.ts`.
+
+## Update: small-phone fix for the ride cards, tips, profile (rating, earnings, email, mobile number, payout details)
+
+- **Ride cards on small phones.** The driver's cards (Navigate to Pickup, Waiting for Rider, Ride in Progress), the rider's ride card and the payment and review cards now sit in a frame
+  that starts under the header, scroll inside it, and leave room under the last item for the phone's own navigation buttons. The main control is first: the code box and **Start Ride**,
+  **I've Arrived**, **Complete Ride**. Before, the rider's contact card made the "Waiting for Rider" card taller than the screen, so Start Ride ended up under the navigation buttons.
+- **Tips.** On the payment page the rider can tap **Add a tip** (Rs 10, 20, 50, 100 or another amount, up to Rs 500). The QR code and the UPI link then ask for fare + tip, and the driver's screen
+  shows "Fare + tip. The whole tip is yours." A tip can change until the rider taps "I have paid" or the driver collects. It joins the driver's earnings once, with no platform fee.
+  Server: `PUT /api/rides/:id/payment/tip`.
+- **Profile header** (rider Profile tab, and Settings for both): name, number, email, the person's **rating** (from the anonymous reviews list) and, for drivers, **earnings**: earned, trips, tips, fees due.
+- **Email** (optional, not verified) in Edit profile. **Mobile number**: Profile, then Mobile number. A code is sent to the NEW number (Firebase or the plain code, like signing in) and the account moves to it;
+  trips and reviews stay. The number is claimed atomically, the old one is freed, and the change is written to the audit log with the numbers hidden. With Firebase on, the new number needs Firebase texts to work (billing),
+  or to be in the fixed list for testers.
+- **Payout details** (drivers: Settings, then Payout details): the UPI ID (moved here from Edit profile) and a bank account (name, account number typed twice, IFSC). The full account number is saved **encrypted**
+  (`server/secrets.ts`, key from `DATA_KEY`, else from `SESSION_SECRET`) and is never sent to any app or to the admin list: only the last 4 digits. The admin can open a driver's full payout details from
+  the console (People, then Payout); each look is written to the audit log. **Set `DATA_KEY` once before drivers save bank details** (see `.env.example`).
+- Server: `PUT/DELETE /api/me/bank`, `POST /api/me/phone/request`, `POST /api/me/phone/verify`, `GET /api/admin/users/:id/payout`. No database migration: all new fields are optional.
+New files: `components/ProfileHeader.tsx`, `app/account/change-phone.tsx`, `app/account/payout.tsx`, `server/secrets.ts`.
