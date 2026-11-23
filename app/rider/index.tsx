@@ -5,7 +5,8 @@ import {
 } from 'react-native';
 import { router, Redirect } from 'expo-router';
 import MapView, { Marker, PROVIDER_DEFAULT, RouteLine } from '@/components/MapView';
-import { MAPPLS_ON, searchPlaces, reversePlace, getRoute, type RouteInfo } from '@/lib/places';
+import { MAPPLS_ON, reversePlace, getRoute, type RouteInfo, type Place } from '@/lib/places';
+import PlaceSearchSheet, { type SearchField } from '@/components/PlaceSearchSheet';
 import AppModal, { useAppModal } from '@/components/AppModal';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -25,6 +26,10 @@ const { width, height } = Dimensions.get('window');
 const ASPECT_RATIO = width / height;
 const LATITUDE_DELTA = 0.015;
 const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
+// Where the map starts when there is no GPS fix (Jangareddygudem, the same default the server uses).
+const FALLBACK_CENTER = { lat: 17.1225, lng: 81.2945 };
+
+interface PickupPoint { lat: number; lng: number; address: string }
 
 type RiderPhase = 'idle' | 'selecting_dropoff' | 'confirming' | 'waiting' | 'matched' | 'riding' | 'completed';
 
@@ -58,6 +63,10 @@ function RiderScreenInner() {
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [dropoffCoord, setDropoffCoord] = useState<{ lat: number; lng: number } | null>(null);
   const [pickupAddress, setPickupAddress] = useState('Current Location');
+  // The rider can pick any pickup. GPS (location + pickupAddress) is only the default when this is null.
+  const [pickupOverride, setPickupOverride] = useState<PickupPoint | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchField, setSearchField] = useState<SearchField>('to');
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
   const [quotes, setQuotes] = useState<Record<string, FareQuote> | null>(null);
   const [vehicleType, setVehicleType] = useState<VehicleType>('bike');
@@ -65,14 +74,10 @@ function RiderScreenInner() {
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [addressInput, setAddressInput] = useState('');
-  const [addressSearching, setAddressSearching] = useState(false);
-  const [addressSuggestions, setAddressSuggestions] = useState<Array<{ label: string; address: string; lat: number; lng: number }>>([]);
   const [recents, setRecents] = useState<Array<{ lat: number; lng: number; address: string }>>([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [placeLabel, setPlaceLabel] = useState('');
   const [savingPlace, setSavingPlace] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState(''); // private note to the admins
   const [reviewTags, setReviewTags] = useState<string[]>([]);
@@ -90,19 +95,22 @@ function RiderScreenInner() {
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
   useEffect(() => { locationRef.current = location; }, [location]);
+  const pickupPoint: PickupPoint | null = pickupOverride ?? (location ? { lat: location.lat, lng: location.lng, address: pickupAddress } : null);
+  const pickupPointRef = useRef<PickupPoint | null>(pickupPoint);
+  pickupPointRef.current = pickupPoint;
 
   // The road route from the rider to the chosen drop-off (Mappls builds only). One request per chosen place,
   // keyed to a rounded position so a small GPS wobble does not trigger another request.
-  const routeFrom = location ? `${location.lat.toFixed(3)},${location.lng.toFixed(3)}` : '';
+  const routeFrom = pickupPoint ? `${pickupPoint.lat.toFixed(4)},${pickupPoint.lng.toFixed(4)}` : '';
   const routeTo = dropoffCoord ? `${dropoffCoord.lat.toFixed(5)},${dropoffCoord.lng.toFixed(5)}` : '';
   const wantsRoute = MAPPLS_ON && !!routeFrom && !!routeTo && (phase === 'selecting_dropoff' || phase === 'confirming');
   useEffect(() => {
-    if (!wantsRoute || !locationRef.current || !dropoffCoord) {
+    if (!wantsRoute || !pickupPointRef.current || !dropoffCoord) {
       setRoute(null);
       return;
     }
     let cancelled = false;
-    getRoute(locationRef.current, dropoffCoord).then((r) => {
+    getRoute(pickupPointRef.current, dropoffCoord).then((r) => {
       if (cancelled) return;
       setRoute(r);
       if (r && r.points.length > 1) {
@@ -151,7 +159,7 @@ function RiderScreenInner() {
     }
   }, [location]);
 
-  const requestLocation = async () => {
+  const requestLocation = async (): Promise<boolean> => {
     if (Platform.OS === 'web') {
       try {
         navigator.geolocation.getCurrentPosition(
@@ -168,30 +176,49 @@ function RiderScreenInner() {
         setLocation({ lat: 17.1225, lng: 81.2945 });
         setPermissionStatus('granted');
       }
-      return;
+      return true;
     }
 
     const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      setPermissionStatus(status); // GPS is optional: the rider can still pick a pickup by searching
+      return false;
+    }
+
+    // A fresh fix, but never wait forever: fall back to the last known position.
+    let pos: Location.LocationObject | null = null;
+    try {
+      pos = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+      ]);
+    } catch {}
+    if (!pos) {
+      try { pos = await Location.getLastKnownPositionAsync(); } catch {}
+    }
     setPermissionStatus(status);
-    if (status !== 'granted') return;
+    if (!pos) return false;
 
-    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-    setLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+    const { latitude, longitude } = pos.coords;
+    setLocation({ lat: latitude, lng: longitude });
 
+    // A readable address for the pickup. Try the phone's geocoder, then our server, and only then a plain label.
+    let address = '';
     try {
       if (MAPPLS_ON) {
-        setPickupAddress(await reversePlace(loc.coords.latitude, loc.coords.longitude));
+        address = await reversePlace(latitude, longitude);
       } else {
-        const geocode = await Location.reverseGeocodeAsync({
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        });
-        if (geocode.length > 0) {
-          const g = geocode[0];
-          setPickupAddress(`${g.street || ''} ${g.city || ''}`.trim() || 'Current Location');
-        }
+        const geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+        const g = geocode[0];
+        if (g) address = `${g.street || ''} ${g.city || ''}`.trim();
       }
     } catch {}
+    if (!address || /^-?\d+\.\d+,\s*-?\d+/.test(address)) {
+      const fromServer = await reversePlace(latitude, longitude); // never throws; may return coordinates
+      address = /^-?\d+\.\d+,\s*-?\d+/.test(fromServer) ? '' : fromServer;
+    }
+    setPickupAddress(address || 'Current location');
+    return true;
   };
 
   const updateServerLocation = async () => {
@@ -282,15 +309,6 @@ function RiderScreenInner() {
     setDropoffAddress(await reversePlace(lat, lng));
   };
 
-  // Search runs only when the rider presses search (the free address service does not allow search-as-you-type).
-  const handleAddressInputChange = useCallback((text: string) => {
-    setAddressInput(text);
-    if (text.trim().length < 3) {
-      setAddressSuggestions([]);
-      setShowSuggestions(false);
-    }
-  }, []);
-
   const moveMapTo = (lat: number, lng: number) => {
     (mapRef.current as any)?.animateToRegion?.({
       latitude: lat,
@@ -301,41 +319,53 @@ function RiderScreenInner() {
   };
 
   const choosePlace = useCallback((p: { lat: number; lng: number; address: string }) => {
-    setAddressInput(p.address);
     setDropoffCoord({ lat: p.lat, lng: p.lng });
     setDropoffAddress(p.address);
-    setShowSuggestions(false);
-    setAddressSuggestions([]);
     setSaveOpen(false);
     setPhase('selecting_dropoff');
     Keyboard.dismiss();
     moveMapTo(p.lat, p.lng);
   }, []);
 
-  const selectSuggestion = useCallback((x: { label: string; address: string; lat: number; lng: number }) => {
-    choosePlace({ lat: x.lat, lng: x.lng, address: x.label });
-  }, [choosePlace]);
+  // ---- From / To search sheet ------------------------------------------------------------------------
+  const openSearch = (field: SearchField) => {
+    setSearchField(field);
+    setSearchOpen(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
-  const searchAddress = async () => {
-    const q = addressInput.trim();
-    if (q.length < 3) return;
-    setAddressSearching(true);
-    setShowSuggestions(false);
-    try {
-      const places = await searchPlaces(q, locationRef.current);
-      if (places.length > 0) {
-        setAddressSuggestions(places);
-        setShowSuggestions(true);
-      } else {
-        setAddressSuggestions([]);
-        showAlert('No match', 'We could not find that place. Try a nearby landmark, or tap the spot on the map.');
-      }
-    } catch (e: any) {
-      showAlert('Search unavailable', (e.message || 'Please try again') + ' You can still tap the spot on the map.');
-    } finally {
-      setAddressSearching(false);
+  const handleSheetPick = (field: SearchField, place: Place) => {
+    if (field === 'from') {
+      setPickupOverride({ lat: place.lat, lng: place.lng, address: place.label });
+      moveMapTo(place.lat, place.lng);
+    } else {
+      setSearchOpen(false);
+      choosePlace({ lat: place.lat, lng: place.lng, address: place.label });
     }
   };
+
+  // GPS as a choice, not a rule. Asks for the location again if it was off or denied.
+  const useCurrentLocation = async (): Promise<boolean> => {
+    const ok = locationRef.current ? true : await requestLocation();
+    if (!ok) return false;
+    setPickupOverride(null);
+    if (locationRef.current) moveMapTo(locationRef.current.lat, locationRef.current.lng);
+    return true;
+  };
+
+  const chooseOnMap = () => {
+    setSearchOpen(false);
+    setPhase('selecting_dropoff');
+  };
+
+  // The first GPS fix recentres the map (it starts at the default centre while we wait).
+  const centredOnGps = useRef(false);
+  useEffect(() => {
+    if (location && !centredOnGps.current) {
+      centredOnGps.current = true;
+      moveMapTo(location.lat, location.lng);
+    }
+  }, [location]);
 
   // Recent destinations from past rides, shown as quick choices.
   useEffect(() => {
@@ -446,12 +476,13 @@ function RiderScreenInner() {
   };
 
   const handleConfirmDropoff = async () => {
-    if (!dropoffCoord || !location) return;
+    if (!dropoffCoord) return;
+    if (!pickupPoint) { openSearch('from'); return; } // no GPS and no pickup chosen yet
     setLoading(true);
     try {
       const res = await apiRequest(
         'GET',
-        `/api/fare/estimate?pLat=${location.lat}&pLng=${location.lng}&dLat=${dropoffCoord.lat}&dLng=${dropoffCoord.lng}`,
+        `/api/fare/estimate?pLat=${pickupPoint.lat}&pLng=${pickupPoint.lng}&dLat=${dropoffCoord.lat}&dLng=${dropoffCoord.lng}`,
       );
       const data = await res.json();
       setQuotes(data.quotes);
@@ -467,12 +498,12 @@ function RiderScreenInner() {
   };
 
   const handleRequestRide = async () => {
-    if (!location || !dropoffCoord || !user?.id) return;
+    if (!pickupPoint || !dropoffCoord || !user?.id) return;
     setLoading(true);
     try {
       const res = await apiRequest('POST', '/api/rides', {
         vehicleType,
-        pickup: { lat: location.lat, lng: location.lng, address: pickupAddress },
+        pickup: { lat: pickupPoint.lat, lng: pickupPoint.lng, address: pickupPoint.address },
         dropoff: { lat: dropoffCoord.lat, lng: dropoffCoord.lng, address: dropoffAddress },
       });
       const ride = await res.json();
@@ -556,8 +587,6 @@ function RiderScreenInner() {
     setVehicleType('bike'); // Reset to default vehicle type
     setDriverInfo(null);
     setNearbyDrivers([]); // Clear any stale drivers
-    setAddressInput('');
-    setAddressSuggestions([]); // Clear address suggestions
     setReviewRating(0);
     setReviewComment('');
     setReviewTags([]);
@@ -568,6 +597,7 @@ function RiderScreenInner() {
     setRoute(null); // Clear previous route
     // Restore pickup to current location for convenience
     setPickupAddress('Current Location');
+    setPickupOverride(null);
   }, []);
 
   if (permissionStatus === null) {
@@ -579,28 +609,29 @@ function RiderScreenInner() {
     );
   }
 
-  if (permissionStatus !== 'granted' && Platform.OS !== 'web') {
-    return (
-      <View style={[styles.loadingContainer, { backgroundColor: Colors.backgroundDark }]}>
-        <Ionicons name="location-outline" size={48} color={Colors.textLight} />
-        <Text style={styles.loadingText}>Location access is required</Text>
-        <Pressable style={styles.permBtn} onPress={requestLocation}>
-          <Text style={styles.permBtnText}>Grant Permission</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
-      {location && (
+      <PlaceSearchSheet
+        visible={searchOpen}
+        initialField={searchField}
+        fromText={pickupPoint ? pickupPoint.address : ''}
+        toText={dropoffCoord ? dropoffAddress : ''}
+        near={pickupPoint ?? location}
+        recents={recents}
+        currentLabel={pickupAddress}
+        onPick={handleSheetPick}
+        onUseCurrentLocation={useCurrentLocation}
+        onChooseOnMap={chooseOnMap}
+        onClose={() => setSearchOpen(false)}
+      />
+      {(
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFillObject}
           provider={PROVIDER_DEFAULT}
           initialRegion={{
-            latitude: location.lat,
-            longitude: location.lng,
+            latitude: (location ?? FALLBACK_CENTER).lat,
+            longitude: (location ?? FALLBACK_CENTER).lng,
             latitudeDelta: LATITUDE_DELTA,
             longitudeDelta: LONGITUDE_DELTA,
           }}
@@ -623,6 +654,17 @@ function RiderScreenInner() {
               </View>
             </Marker>
           ))}
+
+          {pickupOverride && (
+            <Marker
+              coordinate={{ latitude: pickupOverride.lat, longitude: pickupOverride.lng }}
+              title="Pickup"
+            >
+              <View style={styles.pickupMarker}>
+                <View style={styles.pickupMarkerDot} />
+              </View>
+            </Marker>
+          )}
 
           {dropoffCoord && (
             <Marker
@@ -659,19 +701,23 @@ function RiderScreenInner() {
         <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, { paddingBottom: bottomInset + 16 }]}>
           <View style={styles.cardHandle} />
           <Text style={styles.cardTitle}>Where to?</Text>
-          <Pressable
-            style={styles.destinationInput}
-            onPress={() => {
-              setPhase('selecting_dropoff');
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }}
-          >
-            <Ionicons name="search" size={20} color={Colors.textLight} />
-            <Text style={styles.destinationPlaceholder}>Search or tap map to set destination</Text>
-          </Pressable>
-          <View style={styles.pickupRow}>
-            <View style={styles.pickupDot} />
-            <Text style={styles.pickupText} numberOfLines={1}>{pickupAddress}</Text>
+          <View style={styles.fromToCard}>
+            <Pressable testID="home-from-row" style={styles.ftRow} onPress={() => openSearch('from')} accessibilityLabel="Change pickup location">
+              <View style={styles.pickupDot} />
+              <Text style={[styles.ftText, !pickupPoint && styles.ftPlaceholder]} numberOfLines={1}>
+                {pickupPoint ? pickupPoint.address : 'Choose pickup location'}
+              </Text>
+              {!pickupOverride && !!location && <Text style={styles.gpsTag}>GPS</Text>}
+              <Ionicons name="search" size={20} color={Colors.textLight} />
+            </Pressable>
+            <View style={styles.ftDivider} />
+            <Pressable testID="home-to-row" style={styles.ftRow} onPress={() => openSearch('to')} accessibilityLabel="Search destination">
+              <View style={styles.dropoffDot} />
+              <Text style={[styles.ftText, !dropoffCoord && styles.ftPlaceholder]} numberOfLines={1}>
+                {dropoffCoord ? dropoffAddress : 'Search destination'}
+              </Text>
+              <Ionicons name="search" size={20} color={Colors.textLight} />
+            </Pressable>
           </View>
           {quickPlaces.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }} contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
@@ -696,50 +742,26 @@ function RiderScreenInner() {
           <View style={styles.cardHandle} />
           <Text style={styles.cardTitle}>Set your destination</Text>
 
-          <View style={styles.searchRow}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Type an address..."
-              placeholderTextColor={Colors.textLight}
-              value={addressInput}
-              onChangeText={handleAddressInputChange}
-              onSubmitEditing={searchAddress}
-              returnKeyType="search"
-              autoFocus={Platform.OS === 'web'}
-            />
-            <Pressable
-              style={[styles.searchBtn, addressSearching && styles.btnDisabled]}
-              onPress={searchAddress}
-              disabled={addressSearching}
-              accessibilityLabel="Search address"
-            >
-              {addressSearching ? (
-                <ActivityIndicator size="small" color={Colors.secondary} />
-              ) : (
-                <Ionicons name="search" size={20} color={Colors.secondary} />
-              )}
+          <View style={styles.fromToCard}>
+            <Pressable testID="home-from-row" style={styles.ftRow} onPress={() => openSearch('from')} accessibilityLabel="Change pickup location">
+              <View style={styles.pickupDot} />
+              <Text style={[styles.ftText, !pickupPoint && styles.ftPlaceholder]} numberOfLines={1}>
+                {pickupPoint ? pickupPoint.address : 'Choose pickup location'}
+              </Text>
+              {!pickupOverride && !!location && <Text style={styles.gpsTag}>GPS</Text>}
+              <Ionicons name="search" size={20} color={Colors.textLight} />
+            </Pressable>
+            <View style={styles.ftDivider} />
+            <Pressable testID="home-to-row" style={styles.ftRow} onPress={() => openSearch('to')} accessibilityLabel="Search destination">
+              <View style={styles.dropoffDot} />
+              <Text style={[styles.ftText, !dropoffCoord && styles.ftPlaceholder]} numberOfLines={1}>
+                {dropoffCoord ? dropoffAddress : 'Search destination'}
+              </Text>
+              <Ionicons name="search" size={20} color={Colors.textLight} />
             </Pressable>
           </View>
 
           <ScrollView style={styles.cardScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} nestedScrollEnabled>
-          {showSuggestions && addressSuggestions.length > 0 && (
-            <View style={styles.suggestionsContainer}>
-              {addressSuggestions.slice(0, 6).map((item, idx) => (
-                <Pressable
-                  key={`${item.lat}-${item.lng}-${idx}`}
-                  style={({ pressed }) => [styles.suggestionItem, pressed && { backgroundColor: Colors.background }, idx < Math.min(addressSuggestions.length, 6) - 1 && styles.suggestionBorder]}
-                  onPress={() => selectSuggestion(item)}
-                >
-                  <Ionicons name="location-outline" size={18} color={Colors.primary} style={{ marginTop: 2 }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.suggestionPrimary} numberOfLines={1}>{item.label}</Text>
-                    <Text style={styles.suggestionSecondary} numberOfLines={1}>{item.address}</Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          )}
-
           <Text style={styles.orDividerText}>or tap on the map</Text>
 
           {dropoffCoord ? (
@@ -747,7 +769,7 @@ function RiderScreenInner() {
               <View style={styles.routeInfo}>
                 <View style={styles.routePoint}>
                   <View style={styles.pickupDot} />
-                  <Text style={styles.routeText} numberOfLines={1}>{pickupAddress}</Text>
+                  <Text style={styles.routeText} numberOfLines={1}>{pickupPoint ? pickupPoint.address : 'Choose pickup location'}</Text>
                 </View>
                 <View style={styles.routeDivider} />
                 <View style={styles.routePoint}>
@@ -780,7 +802,7 @@ function RiderScreenInner() {
               <View style={styles.btnRow}>
                 <Pressable
                   style={({ pressed }) => [styles.cancelBtn, pressed && styles.btnPressed]}
-                  onPress={() => { setPhase('idle'); setDropoffCoord(null); setDropoffAddress(''); setAddressInput(''); setShowSuggestions(false); setAddressSuggestions([]); setSaveOpen(false); }}
+                  onPress={() => { setPhase('idle'); setDropoffCoord(null); setDropoffAddress(''); setSaveOpen(false); }}
                 >
                   <Ionicons name="close" size={20} color={Colors.textLight} />
                 </Pressable>
@@ -1256,6 +1278,14 @@ const styles = StyleSheet.create({
   suggestionSecondary: {
     fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textLight, marginTop: 2,
   },
+  fromToCard: { backgroundColor: Colors.background, borderRadius: 14, marginTop: 4 },
+  ftRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 52 },
+  ftDivider: { height: 1, backgroundColor: Colors.border, marginLeft: 38 },
+  ftText: { flex: 1, fontSize: 15, fontFamily: 'Inter_500Medium', color: Colors.text },
+  ftPlaceholder: { fontFamily: 'Inter_400Regular', color: Colors.textLight },
+  gpsTag: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: Colors.primaryDark, backgroundColor: 'rgba(0,217,165,0.14)', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, overflow: 'hidden' },
+  pickupMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,217,165,0.25)', justifyContent: 'center', alignItems: 'center' },
+  pickupMarkerDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: Colors.primary, borderWidth: 2, borderColor: Colors.textWhite },
   pickupRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12,
   },

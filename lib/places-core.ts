@@ -5,6 +5,8 @@
  */
 export interface LatLng { lat: number; lng: number }
 export interface Place { label: string; address: string; lat: number; lng: number }
+/** A search suggestion. Google suggestions have a placeId and no coordinates until resolveSuggestion() runs. */
+export interface Suggestion { label: string; address: string; lat: number | null; lng: number | null; placeId?: string }
 export interface RouteInfo { points: LatLng[]; km: number; minutes: number }
 
 export function haversineKm(a: LatLng, b: LatLng): number {
