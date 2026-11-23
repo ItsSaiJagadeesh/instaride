@@ -363,7 +363,7 @@ export default function RiderBookingScreen() {
                 value={pickupSearchInput}
                 onChangeText={handlePickupSearch}
                 onFocus={() => setShowPickupSuggestions(true)}
-                placeholderTextColor={Colors.textExtraLight}
+                placeholderTextColor={Colors.textLight}
               />
             </View>
             {showPickupSuggestions && pickupSuggestions.length > 0 && (
@@ -388,14 +388,14 @@ export default function RiderBookingScreen() {
           {/* Destination */}
           <View style={styles.locationInputGroup}>
             <View style={styles.locationInputWrapper}>
-              <Ionicons name="location-sharp" size={20} color={Colors.danger} />
+              <Ionicons name="location-sharp" size={20} color={Colors.error} />
               <TextInput
                 style={styles.locationInput}
                 placeholder="Where do you want to go?"
                 value={destinationSearchInput}
                 onChangeText={handleDestinationSearch}
                 onFocus={() => setShowDestinationSuggestions(true)}
-                placeholderTextColor={Colors.textExtraLight}
+                placeholderTextColor={Colors.textLight}
               />
             </View>
             {showDestinationSuggestions && (
@@ -455,7 +455,7 @@ export default function RiderBookingScreen() {
                     <Ionicons
                       name={type === 'bike' ? 'bicycle' : 'car'}
                       size={24}
-                      color={vehicleType === type ? Colors.white : Colors.textLight}
+                      color={vehicleType === type ? Colors.textWhite : Colors.textLight}
                     />
                     <Text style={[styles.vehicleLabel, vehicleType === type && styles.vehicleLabelActive]}>
                       {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -474,10 +474,10 @@ export default function RiderBookingScreen() {
                 disabled={bookingLoading}
               >
                 {bookingLoading ? (
-                  <ActivityIndicator color={Colors.white} />
+                  <ActivityIndicator color={Colors.textWhite} />
                 ) : (
                   <>
-                    <Ionicons name="car" size={20} color={Colors.white} />
+                    <Ionicons name="car" size={20} color={Colors.textWhite} />
                     <Text style={styles.requestButtonText}>
                       Request {vehicleType} • ₹{estimatedFare.toFixed(0)}
                     </Text>
@@ -522,7 +522,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
   },
   tripTypeButtonActive: { borderColor: Colors.primary, backgroundColor: Colors.primary },
   tripTypeText: { fontSize: 13, color: Colors.text, textAlign: 'center', fontWeight: '600' },
-  tripTypeTextActive: { color: Colors.white },
+  tripTypeTextActive: { color: Colors.textWhite },
   locationInputGroup: { marginBottom: 12 },
   locationInputWrapper: {
     flexDirection: 'row',
@@ -599,9 +599,9 @@ const styles = StyleSheet.create({
   },
   vehicleOptionActive: { borderColor: Colors.primary, backgroundColor: Colors.primary },
   vehicleLabel: { fontSize: 12, color: Colors.text, fontWeight: '600' },
-  vehicleLabelActive: { color: Colors.white },
+  vehicleLabelActive: { color: Colors.textWhite },
   vehiclePrice: { fontSize: 11, color: Colors.textLight, fontWeight: '500' },
-  vehiclePriceActive: { color: Colors.white },
+  vehiclePriceActive: { color: Colors.textWhite },
   requestButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -612,7 +612,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginVertical: 12,
   },
-  requestButtonText: { fontSize: 15, color: Colors.white, fontWeight: '600' },
+  requestButtonText: { fontSize: 15, color: Colors.textWhite, fontWeight: '600' },
   scheduleLink: {
     flexDirection: 'row',
     alignItems: 'center',
