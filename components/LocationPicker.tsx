@@ -5,7 +5,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
-import { searchPlaces, type PlaceSuggestion } from '@/lib/places';
+import { searchPlaces } from '@/lib/places';
+
+interface PlaceSuggestion {
+  label: string;
+  address: string;
+  lat: number;
+  lng: number;
+}
 
 interface LocationPickerProps {
   label: string;
@@ -97,7 +104,6 @@ export default function LocationPicker({
           onChangeText={setInput}
           onFocus={() => setShowSuggestions(true)}
           returnKeyType="search"
-          placeholderTextColor={Colors.textLight}
         />
 
         {/* Loading indicator or clear button */}
