@@ -74,7 +74,7 @@ export default function RiderBookingScreen() {
   const [estimatedFare, setEstimatedFare] = useState(0);
   const [estimatedDuration, setEstimatedDuration] = useState(0);
   const [journeyType, setJourneyType] = useState<'LOCAL' | 'INTERCITY'>('LOCAL');
-  const [booking Loading, setBookingLoading] = useState(false);
+  const [bookingLoading, setBookingLoading] = useState(false);
 
   // UI state
   const [showIntercityConfirm, setShowIntercityConfirm] = useState(false);
