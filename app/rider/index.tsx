@@ -36,14 +36,14 @@ export default function RiderBookingScreen() {
   const [pickupSearchInput, setPickupSearchInput] = useState('');
   const [pickupSuggestions, setPickupSuggestions] = useState<Place[]>([]);
   const [showPickupSuggestions, setShowPickupSuggestions] = useState(false);
-  const pickupSearchRef = useRef<NodeJS.Timeout>();
+  const pickupSearchRef = useRef<NodeJS.Timeout | null>(null);
 
   // Destination state
   const [destination, setDestination] = useState<LocationCoord | null>(null);
   const [destinationSearchInput, setDestinationSearchInput] = useState('');
   const [destinationSuggestions, setDestinationSuggestions] = useState<Place[]>([]);
   const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
-  const destinationSearchRef = useRef<NodeJS.Timeout>();
+  const destinationSearchRef = useRef<NodeJS.Timeout | null>(null);
 
   // Booking options
   const [tripType, setTripType] = useState<TripType>('one-way');
