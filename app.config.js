@@ -66,12 +66,6 @@ function withGoogleMaps(config) {
   return { ...config, android: { ...config.android, config: { ...(config.android && config.android.config), googleMaps: { apiKey: key } } } };
 }
 
-// Mappls (the map for the real app): only for builds that were set up with the two Mappls licence files.
-function withMappls(config) {
-  if (process.env.MAPPLS_ENABLED !== '1') return config;
-  return { ...config, plugins: [...(config.plugins || []), './plugins/with-mappls'] };
-}
-
 // Firebase (phone sign-in for real users): only for builds that were given google-services.json.
 function withFirebase(config) {
   if (process.env.FIREBASE_ENABLED !== '1') return config;
@@ -86,7 +80,7 @@ function withFirebase(config) {
   };
 }
 
-module.exports = (args) => withFirebase(withMappls(withGoogleMaps(withVersionCode(build(args)))));
+module.exports = (args) => withFirebase(withGoogleMaps(withVersionCode(build(args))));
 
 function build({ config }) {
   checkCloudBuild();
