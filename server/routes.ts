@@ -22,7 +22,7 @@ import {
   rateLimit,
 } from "./auth";
 import { haversineKm, quoteFare } from "./fare";
-import { searchPlaces, reversePlace } from "./geocode";
+import { searchPlaces, reversePlace, resolvePlace } from "./geocode";
 import { startPhoneProof, verifyPhoneProof, OtpError } from "./otp";
 import { SmsError } from "./sms";
 import { buildReadiness, MANUAL_STEPS } from "./readiness";
@@ -1387,16 +1387,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // ---------------------------------------------------- address search
-  const geoLimit = rateLimit((req) => "geo:" + req.ip, 40, 60 * 1000);
+  // Typing triggers one request per pause, so allow more than the old button-press search did.
+  const geoLimit = rateLimit((req) => "geo:" + req.ip, 90, 60 * 1000);
+  const SESSION_TOKEN = /^[A-Za-z0-9_-]{8,64}$/;
+  const PLACE_ID = /^[A-Za-z0-9_-]{10,300}$/;
+  const optionalCoord = (v: unknown, max: number) => {
+    const n = parseFloat(String(v ?? ""));
+    return isFinite(n) && Math.abs(n) <= max ? n : undefined;
+  };
 
   app.get("/api/geocode/search", geoLimit, auth, async (req, res) => {
     try {
       const q = String(req.query.q ?? "");
       if (q.trim().length < 3) return res.json([]);
+      const token = String(req.query.sessionToken ?? "");
       const config = await storage.getConfig();
-      return res.json(await searchPlaces(q, config.serviceArea));
+      return res.json(
+        await searchPlaces(q, config.serviceArea, {
+          lat: optionalCoord(req.query.lat, 90),
+          lng: optionalCoord(req.query.lng, 180),
+          sessionToken: SESSION_TOKEN.test(token) ? token : undefined,
+        }),
+      );
     } catch (e: any) {
       return res.status(e?.status || 502).json({ message: e?.message || "Address search failed" });
+    }
+  });
+
+  // The coordinates of one suggestion the rider picked (Google suggestions carry only a placeId until then).
+  app.get("/api/geocode/details", geoLimit, auth, async (req, res) => {
+    try {
+      const placeId = String(req.query.placeId ?? "");
+      if (!PLACE_ID.test(placeId)) return res.status(400).json({ message: "placeId required" });
+      const token = String(req.query.sessionToken ?? "");
+      const place = await resolvePlace(placeId, SESSION_TOKEN.test(token) ? token : undefined);
+      if (!place) return res.status(404).json({ message: "That place could not be found" });
+      return res.json(place);
+    } catch (e: any) {
+      return res.status(e?.status || 502).json({ message: e?.message || "Place lookup failed" });
     }
   });
 
