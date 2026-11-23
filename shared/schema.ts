@@ -223,6 +223,7 @@ export interface Ride {
   status: RideStatus;
   pickup: { lat: number; lng: number; address: string };
   dropoff: { lat: number; lng: number; address: string };
+  journeyType?: 'local' | 'intercity'; // local = within service area, intercity = outside service area
   fare?: FareBreakdown;
   distance?: number; // km
   duration?: number; // minutes

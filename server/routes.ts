@@ -882,6 +882,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json(await paymentInfoFor(updated!));
   });
 
+  // Driver today's statistics: earnings, trips, kilometres, online time, rating
+  // All calculations use Asia/Kolkata timezone
+  app.get("/api/driver/stats/today", auth, requireRole("driver"), async (req, res) => {
+    const driverId = req.user!.id;
+    const rides = (await storage.getRidesByDriver(driverId)).filter((r) => r.status === "completed" && r.completedAt);
+
+    // Asia/Kolkata timezone for daily calculations
+    const now = new Date();
+    const istFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const todayIST = istFormatter.format(now);
+    const [month, day, year] = todayIST.split("/");
+    const todayStart = new Date(`${year}-${month}-${day}T00:00:00+05:30`);
+    const todayEnd = new Date(`${year}-${month}-${day}T23:59:59+05:30`);
+
+    const todayRides = rides.filter((r) => {
+      const completed = new Date(r.completedAt!);
+      return completed >= todayStart && completed <= todayEnd;
+    });
+
+    const earnings = todayRides.reduce((sum, r) => sum + (r.fare?.driverEarnings || 0), 0);
+    const distance = todayRides.reduce((sum, r) => sum + (r.distance || 0), 0);
+    const rideCount = todayRides.length;
+
+    // Online time: sum of all online sessions today (requires backend tracking)
+    // For now, return 0 as placeholder (needs online session table in database)
+    const onlineSeconds = 0;
+
+    // Average rating from completed rides today
+    const ratingsToday = todayRides.filter((r) => r.review?.rating).map((r) => r.review!.rating);
+    const avgRating = ratingsToday.length ? (ratingsToday.reduce((a, b) => a + b, 0) / ratingsToday.length) : null;
+
+    return res.json({
+      earnings: Math.round(earnings * 100) / 100,
+      distance: Math.round(distance * 100) / 100,
+      trips: rideCount,
+      onlineSeconds,
+      avgRating: avgRating ? Math.round(avgRating * 10) / 10 : null,
+      ratingCount: ratingsToday.length,
+    });
+  });
+
   // What riders said about this driver. Anonymous on purpose: no name, number or trip details, only the date, the stars, the tags and
   // the written review. Written reviews an admin has hidden are left out. The private note to admins is never included.
   app.get("/api/driver/reviews", auth, requireRole("driver"), async (req, res) => {

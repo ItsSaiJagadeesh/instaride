@@ -15,6 +15,7 @@ const Colors = {
   warning: '#FFCC00',
   border: '#E2E8F0',
   borderDark: '#2D2D2D',
+  inputBackground: '#FFFFFF',
   mapOverlay: 'rgba(255, 255, 255, 0.95)',
   cardShadow: 'rgba(0, 0, 0, 0.08)',
   driverOnline: '#34C759',

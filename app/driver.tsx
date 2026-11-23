@@ -49,6 +49,7 @@ function DriverScreenInner() {
   const [pendingRides, setPendingRides] = useState<Ride[]>([]);
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
   const [earnings, setEarnings] = useState({ today: 0, total: user?.totalEarnings || 0, rides: user?.totalRides || 0 });
+  const [todayStats, setTodayStats] = useState<{ earnings: number; distance: number; trips: number; onlineSeconds: number; avgRating: number | null; ratingCount: number } | null>(null);
   const [rideHistory, setRideHistory] = useState<Ride[]>([]);
   const [loading, setLoading] = useState(false);
   const [otp, setOtp] = useState('');
@@ -103,13 +104,19 @@ function DriverScreenInner() {
   useEffect(() => {
     if (!user?.id) return;
     fetchRideHistory();
+    fetchTodayStats(); // Fetch today's stats for dashboard
     checkActiveRide();
     refreshUser();
     const interval = setInterval(() => {
       checkActiveRide();
       if (isOnline) fetchPendingRides();
     }, 4000);
-    return () => clearInterval(interval);
+    // Refresh today's stats every 30 seconds
+    const statsInterval = setInterval(fetchTodayStats, 30000);
+    return () => {
+      clearInterval(interval);
+      clearInterval(statsInterval);
+    };
   }, [user?.id, isOnline]);
 
   useEffect(() => {
@@ -267,6 +274,15 @@ function DriverScreenInner() {
     setActiveRide(null);
     setPhase(isOnline ? 'online' : 'dashboard');
     if (isOnline) fetchPendingRides();
+  };
+
+  const fetchTodayStats = async () => {
+    try {
+      const res = await apiRequest('GET', '/api/driver/stats/today');
+      const data = await res.json();
+      setTodayStats(data);
+      setEarnings(prev => ({ ...prev, today: data.earnings }));
+    } catch {}
   };
 
   const fetchRideHistory = async () => {
@@ -438,21 +454,27 @@ function DriverScreenInner() {
 
           <View style={styles.earningsCard}>
             <Text style={styles.earningsLabel}>Today's Earnings</Text>
-            <Text style={styles.earningsAmount}>{formatINR(earnings.today)}</Text>
+            <Text style={styles.earningsAmount}>{formatINR(todayStats?.earnings || earnings.today)}</Text>
             <View style={styles.earningsRow}>
               <View style={styles.earningsStat}>
-                <Text style={styles.earningsStatValue}>{formatINR(earnings.total)}</Text>
-                <Text style={styles.earningsStatLabel}>Total</Text>
+                <Text style={styles.earningsStatValue}>{todayStats?.trips || 0}</Text>
+                <Text style={styles.earningsStatLabel}>Trips</Text>
               </View>
               <View style={styles.earningsDivider} />
               <View style={styles.earningsStat}>
-                <Text style={styles.earningsStatValue}>{earnings.rides}</Text>
-                <Text style={styles.earningsStatLabel}>Rides</Text>
+                <Text style={styles.earningsStatValue}>{todayStats?.distance.toFixed(1) || '0'}</Text>
+                <Text style={styles.earningsStatLabel}>km</Text>
               </View>
               <View style={styles.earningsDivider} />
               <View style={styles.earningsStat}>
-                <Text style={styles.earningsStatValue}>{(user?.rating || 5.0).toFixed(1)}</Text>
-                <Text style={styles.earningsStatLabel}>Rating</Text>
+                <Text style={styles.earningsStatValue}>
+                  {todayStats?.avgRating !== null && todayStats?.avgRating !== undefined
+                    ? todayStats.avgRating.toFixed(1)
+                    : (user?.rating || 0).toFixed(1)}
+                </Text>
+                <Text style={styles.earningsStatLabel}>
+                  {todayStats && todayStats.ratingCount > 0 ? `Rating (${todayStats.ratingCount})` : 'Rating'}
+                </Text>
               </View>
             </View>
           </View>

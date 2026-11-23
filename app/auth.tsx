@@ -33,14 +33,24 @@ export default function AuthScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [countdown, setCountdown] = useState(0);
+  const [countdown, setCountdown] = useState(0); // Firebase resend countdown
+  const [appCooldown, setAppCooldown] = useState(0); // App-level 5-minute cooldown
+  const [otpAttempts, setOtpAttempts] = useState(0); // App-level OTP send attempts (max 3)
   const verifying = useRef(false);
+  const otpAttemptsRef = useRef<Record<string, number>>({}); // Track attempts per phone number
 
   useEffect(() => {
     if (countdown <= 0) return;
     const t = setTimeout(() => setCountdown(countdown - 1), 1000);
     return () => clearTimeout(t);
   }, [countdown]);
+
+  // App-level 5-minute cooldown (after 3 OTP attempts)
+  useEffect(() => {
+    if (appCooldown <= 0) return;
+    const t = setTimeout(() => setAppCooldown(appCooldown - 1), 1000);
+    return () => clearTimeout(t);
+  }, [appCooldown]);
 
   useEffect(() => {
     if (role !== 'driver') return;
@@ -61,6 +71,27 @@ export default function AuthScreen() {
 
   const sendCode = async () => {
     setError(null);
+    
+    // Check app-level cooldown (5 minutes = 300 seconds after 3 attempts)
+    if (appCooldown > 0) {
+      const minutes = Math.ceil(appCooldown / 60);
+      setError(`Too many attempts. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+      return;
+    }
+
+    // Track OTP send attempts per phone number
+    const phoneKey = phone.replace(/\D/g, '');
+    const attempts = (otpAttemptsRef.current[phoneKey] || 0) + 1;
+    otpAttemptsRef.current[phoneKey] = attempts;
+    setOtpAttempts(attempts);
+
+    // Max 3 OTP attempts, then 5-minute app-level cooldown
+    if (attempts > 3) {
+      setError('Maximum OTP attempts reached. Please wait 5 minutes before trying again.');
+      setAppCooldown(300); // 5 minutes
+      return;
+    }
+
     setLoading(true);
     try {
       const out = await requestOtp(phone.trim());
@@ -68,7 +99,12 @@ export default function AuthScreen() {
       setCode('');
       setStep('code');
     } catch (e: any) {
-      setError(e.message || 'Could not send the code');
+      // If Firebase returns auth/too-many-requests, inform user to wait
+      if (e.message?.includes('too-many-requests') || e.message?.includes('Too many')) {
+        setError('Firebase rate limit reached. Please wait a while and try again.');
+      } else {
+        setError(e.message || 'Could not send the code');
+      }
     } finally {
       setLoading(false);
     }
@@ -153,9 +189,13 @@ export default function AuthScreen() {
             <Pressable onPress={() => { setStep('phone'); setError(null); setCode(''); }} accessibilityRole="button">
               <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 14, color: Colors.primaryDark }}>Change number</Text>
             </Pressable>
-            <Pressable onPress={sendCode} disabled={countdown > 0 || loading} accessibilityRole="button">
-              <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 14, color: countdown > 0 ? Colors.textLight : Colors.primaryDark }}>
-                {countdown > 0 ? `Resend code in ${countdown}s` : 'Resend code'}
+            <Pressable onPress={sendCode} disabled={countdown > 0 || appCooldown > 0 || loading} accessibilityRole="button">
+              <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 14, color: (countdown > 0 || appCooldown > 0) ? Colors.textLight : Colors.primaryDark }}>
+                {appCooldown > 0
+                  ? `Try again in ${Math.ceil(appCooldown / 60)}m`
+                  : countdown > 0
+                    ? `Resend in ${countdown}s`
+                    : 'Resend code'}
               </Text>
             </Pressable>
           </View>

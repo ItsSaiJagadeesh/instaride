@@ -546,14 +546,18 @@ function RiderScreenInner() {
     }
   };
 
-  const handleNewRide = () => {
+  const handleNewRide = useCallback(() => {
+    // Prevent duplicate requests by ensuring all state is cleared atomically
     setPhase('idle');
     setActiveRide(null);
     setDropoffCoord(null);
     setDropoffAddress('');
     setQuotes(null);
+    setVehicleType('bike'); // Reset to default vehicle type
     setDriverInfo(null);
+    setNearbyDrivers([]); // Clear any stale drivers
     setAddressInput('');
+    setAddressSuggestions([]); // Clear address suggestions
     setReviewRating(0);
     setReviewComment('');
     setReviewTags([]);
@@ -561,7 +565,10 @@ function RiderScreenInner() {
     setShowAdminNote(false);
     setPaymentDone(false);
     setReviewSubmitted(false);
-  };
+    setRoute(null); // Clear previous route
+    // Restore pickup to current location for convenience
+    setPickupAddress('Current Location');
+  }, []);
 
   if (permissionStatus === null) {
     return (
@@ -998,6 +1005,25 @@ function RiderScreenInner() {
         <View style={[styles.dropoffFrame, { top: topInset + 64, bottom: keyboardHeight }]} pointerEvents="box-none">
         <Animated.View entering={SlideInDown.duration(400)} style={[styles.bottomCard, styles.dropoffCard, { paddingBottom: bottomInset + 16 }]}>
           <View style={styles.cardHandle} />
+          {/* Close button in top-right corner */}
+          <Pressable
+            onPress={() => {
+              setPhase('idle');
+              setActiveRide(null);
+              setReviewSubmitted(false);
+              setReviewRating(0);
+              setReviewComment('');
+              setReviewTags([]);
+              setReviewPeer('');
+              setPaymentDone(false);
+              router.replace('/rider');
+            }}
+            hitSlop={8}
+            accessibilityLabel="Close ride completion"
+            style={styles.completionCloseBtn}
+          >
+            <Ionicons name="close" size={28} color={Colors.text} />
+          </Pressable>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.cardScroll}>
             <View style={styles.completedContent}>
               <View style={styles.completedIcon}>
@@ -1359,6 +1385,10 @@ const styles = StyleSheet.create({
   completedIcon: { marginBottom: 4 },
   completedTitle: {
     fontSize: 22, fontFamily: 'Inter_700Bold', color: Colors.text,
+  },
+  completionCloseBtn: {
+    position: 'absolute', top: 12, right: 12, width: 44, height: 44, borderRadius: 14, backgroundColor: Colors.mapOverlay, justifyContent: 'center', alignItems: 'center', zIndex: 20,
+    ...(Platform.OS !== 'web' ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 4 } : {}),
   },
   completedFare: {
     fontSize: 32, fontFamily: 'Inter_700Bold', color: Colors.primary,
