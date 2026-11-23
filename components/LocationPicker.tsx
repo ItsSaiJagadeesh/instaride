@@ -41,7 +41,7 @@ export default function LocationPicker({
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const searchRef = useRef<NodeJS.Timeout>();
+  const searchRef = useRef<NodeJS.Timeout | undefined>();
 
   // Debounced search
   useEffect(() => {
