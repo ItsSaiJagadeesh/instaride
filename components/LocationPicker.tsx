@@ -50,7 +50,9 @@ export default function LocationPicker({
       return;
     }
 
-    if (searchRef.current) clearTimeout(searchRef.current);
+    if (searchRef.current !== undefined) {
+      clearTimeout(searchRef.current);
+    }
 
     setLoading(true);
     searchRef.current = setTimeout(async () => {
@@ -65,7 +67,9 @@ export default function LocationPicker({
     }, 300); // 300ms debounce
 
     return () => {
-      if (searchRef.current) clearTimeout(searchRef.current);
+      if (searchRef.current !== undefined) {
+        clearTimeout(searchRef.current);
+      }
     };
   }, [input]);
 
