@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator,
   Dimensions, Platform, KeyboardAvoidingView, FlatList, TextInput,
@@ -461,7 +461,7 @@ export default function RiderBookingScreen() {
                       {type.charAt(0).toUpperCase() + type.slice(1)}
                     </Text>
                     <Text style={[styles.vehiclePrice, vehicleType === type && styles.vehiclePriceActive]}>
-                      ₹{estimatedFare.toFixed(0)}
+                      â‚¹{estimatedFare.toFixed(0)}
                     </Text>
                   </Pressable>
                 ))}
@@ -479,7 +479,7 @@ export default function RiderBookingScreen() {
                   <>
                     <Ionicons name="car" size={20} color={Colors.textWhite} />
                     <Text style={styles.requestButtonText}>
-                      Request {vehicleType} • ₹{estimatedFare.toFixed(0)}
+                      Request {vehicleType} â€¢ â‚¹{estimatedFare.toFixed(0)}
                     </Text>
                   </>
                 )}
