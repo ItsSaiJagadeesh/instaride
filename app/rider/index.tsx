@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator,
-  Dimensions, Platform, KeyboardAvoidingView, FlatList, Image,
+  Dimensions, Platform, KeyboardAvoidingView, FlatList, TextInput,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { useQuery } from '@tanstack/react-query';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/lib/auth-context';
-import { searchPlaces } from '@/lib/places';
+import { searchPlaces, Place } from '@/lib/places';
 import { getRideType, calculateIntercityFare } from '@/lib/service-area';
 
 const { width, height } = Dimensions.get('window');
@@ -19,23 +18,6 @@ interface LocationCoord {
   lat: number;
   lng: number;
   address: string;
-}
-
-interface PlaceSuggestion {
-  label: string;
-  address: string;
-  lat: number;
-  lng: number;
-  placeId: string;
-}
-
-interface RecentPlace {
-  id: string;
-  address: string;
-  lat: number;
-  lng: number;
-  type: 'pickup' | 'destination';
-  timestamp: number;
 }
 
 type TripType = 'one-way' | 'round-trip';
@@ -55,7 +37,7 @@ export default function RiderBookingScreen() {
   // Pickup state
   const [pickup, setPickup] = useState<LocationCoord | null>(null);
   const [pickupSearchInput, setPickupSearchInput] = useState('');
-  const [pickupSuggestions, setPickupSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [pickupSuggestions, setPickupSuggestions] = useState<Place[]>([]);
   const [showPickupSuggestions, setShowPickupSuggestions] = useState(false);
   const [pickupSearching, setPickupSearching] = useState(false);
   const pickupSearchRef = useRef<NodeJS.Timeout>();
@@ -63,7 +45,7 @@ export default function RiderBookingScreen() {
   // Destination state
   const [destination, setDestination] = useState<LocationCoord | null>(null);
   const [destinationSearchInput, setDestinationSearchInput] = useState('');
-  const [destinationSuggestions, setDestinationSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [destinationSuggestions, setDestinationSuggestions] = useState<Place[]>([]);
   const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
   const [destinationSearching, setDestinationSearching] = useState(false);
   const destinationSearchRef = useRef<NodeJS.Timeout>();
@@ -78,7 +60,7 @@ export default function RiderBookingScreen() {
 
   // UI state
   const [showIntercityConfirm, setShowIntercityConfirm] = useState(false);
-  const [recentPlaces, setRecentPlaces] = useState<RecentPlace[]>([]);
+  const [recentPlaces, setRecentPlaces] = useState<LocationCoord[]>([]);
 
   // ============================================================
   // 1. AUTO LOCATION ON LOGIN
@@ -112,12 +94,10 @@ export default function RiderBookingScreen() {
             location = await Location.getCurrentPositionAsync({
               accuracy: Location.Accuracy.High,
               timeInterval: 1000,
-              maxAge: 5000,
             });
           } catch (error) {
             attempts++;
             if (attempts < maxAttempts) {
-              // Retry with slight delay
               await new Promise(resolve => setTimeout(resolve, 500));
             }
           }
@@ -223,7 +203,7 @@ export default function RiderBookingScreen() {
     setPickupSearching(true);
     pickupSearchRef.current = setTimeout(async () => {
       try {
-        const results = await searchPlaces(text, currentLocation?.lat, currentLocation?.lng);
+        const results = await searchPlaces(text, currentLocation ? { lat: currentLocation.lat, lng: currentLocation.lng } : null);
         setPickupSuggestions(results || []);
       } catch (error) {
         console.error('Pickup search error:', error);
@@ -234,13 +214,13 @@ export default function RiderBookingScreen() {
     }, 300);
   }, [currentLocation]);
 
-  const handlePickupSelect = useCallback((suggestion: PlaceSuggestion) => {
+  const handlePickupSelect = useCallback((place: Place) => {
     setPickup({
-      lat: suggestion.lat,
-      lng: suggestion.lng,
-      address: suggestion.label,
+      lat: place.latitude,
+      lng: place.longitude,
+      address: place.displayName,
     });
-    setPickupSearchInput(suggestion.label);
+    setPickupSearchInput(place.displayName);
     setShowPickupSuggestions(false);
     setPickupSuggestions([]);
   }, []);
@@ -263,7 +243,7 @@ export default function RiderBookingScreen() {
     setDestinationSearching(true);
     destinationSearchRef.current = setTimeout(async () => {
       try {
-        const results = await searchPlaces(text, pickup?.lat, pickup?.lng);
+        const results = await searchPlaces(text, pickup ? { lat: pickup.lat, lng: pickup.lng } : null);
         setDestinationSuggestions(results || []);
       } catch (error) {
         console.error('Destination search error:', error);
@@ -274,27 +254,27 @@ export default function RiderBookingScreen() {
     }, 300);
   }, [pickup]);
 
-  const handleDestinationSelect = useCallback((suggestion: PlaceSuggestion) => {
+  const handleDestinationSelect = useCallback((place: Place) => {
     setDestination({
-      lat: suggestion.lat,
-      lng: suggestion.lng,
-      address: suggestion.label,
+      lat: place.latitude,
+      lng: place.longitude,
+      address: place.displayName,
     });
-    setDestinationSearchInput(suggestion.label);
+    setDestinationSearchInput(place.displayName);
     setShowDestinationSuggestions(false);
     setDestinationSuggestions([]);
 
     // Check if intercity
     if (pickup) {
-      const type = getRideType(pickup.lat, pickup.lng, suggestion.lat, suggestion.lng);
+      const type = getRideType(pickup.lat, pickup.lng, place.latitude, place.longitude);
       setJourneyType(type);
 
       if (type === 'INTERCITY') {
         const fare = calculateIntercityFare(
           pickup.lat,
           pickup.lng,
-          suggestion.lat,
-          suggestion.lng,
+          place.latitude,
+          place.longitude,
           vehicleType
         );
         setEstimatedFare(fare);
@@ -310,7 +290,6 @@ export default function RiderBookingScreen() {
   useEffect(() => {
     if (!pickup || !destination) return;
 
-    // Simple fare calculation (replace with actual backend API)
     const distance = calculateDistance(pickup.lat, pickup.lng, destination.lat, destination.lng);
     const baseFares: Record<VehicleType, number> = {
       bike: 20,
@@ -328,7 +307,7 @@ export default function RiderBookingScreen() {
     const fare = baseFare + distanceFare;
 
     setEstimatedFare(fare);
-    setEstimatedDuration(Math.ceil(distance * 2.5)); // Rough estimate: 2.5 min per km
+    setEstimatedDuration(Math.ceil(distance * 2.5));
   }, [pickup, destination, vehicleType]);
 
   // ============================================================
@@ -366,24 +345,9 @@ export default function RiderBookingScreen() {
       const { rideId } = await response.json();
 
       // Save to recent places
-      const newRecent: RecentPlace[] = [
-        {
-          id: `${Date.now()}-pickup`,
-          address: pickup.address,
-          lat: pickup.lat,
-          lng: pickup.lng,
-          type: 'pickup',
-          timestamp: Date.now(),
-        },
-        {
-          id: `${Date.now()}-dest`,
-          address: destination.address,
-          lat: destination.lat,
-          lng: destination.lng,
-          type: 'destination',
-          timestamp: Date.now(),
-        },
-        ...recentPlaces.slice(0, 8),
+      const newRecent: LocationCoord[] = [
+        destination,
+        ...recentPlaces.filter(p => p.address !== destination.address).slice(0, 4),
       ];
       setRecentPlaces(newRecent);
 
@@ -411,7 +375,7 @@ export default function RiderBookingScreen() {
         <FlatList
           scrollEnabled={false}
           data={pickupSuggestions}
-          keyExtractor={(_, idx) => idx.toString()}
+          keyExtractor={(item, idx) => `${item.placeId}-${idx}`}
           renderItem={({ item }) => (
             <Pressable
               style={styles.suggestionItem}
@@ -419,7 +383,7 @@ export default function RiderBookingScreen() {
             >
               <Ionicons name="location-outline" size={16} color={Colors.primary} />
               <View style={styles.suggestionText}>
-                <Text style={styles.suggestionLabel}>{item.label}</Text>
+                <Text style={styles.suggestionLabel}>{item.displayName}</Text>
                 <Text style={styles.suggestionAddress}>{item.address}</Text>
               </View>
             </Pressable>
@@ -452,18 +416,18 @@ export default function RiderBookingScreen() {
               <FlatList
                 scrollEnabled={false}
                 data={recentPlaces.slice(0, 4)}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item, idx) => `${item.address}-${idx}`}
                 renderItem={({ item }) => (
                   <Pressable
                     style={styles.recentPlaceItem}
                     onPress={() =>
                       handleDestinationSelect({
-                        label: item.address,
+                        latitude: item.lat,
+                        longitude: item.lng,
+                        displayName: item.address,
                         address: item.address,
-                        lat: item.lat,
-                        lng: item.lng,
-                        placeId: item.id,
-                      })
+                        placeId: item.address,
+                      } as Place)
                     }
                   >
                     <Ionicons name="time-outline" size={16} color={Colors.textLight} />
@@ -479,7 +443,7 @@ export default function RiderBookingScreen() {
             <FlatList
               scrollEnabled={false}
               data={destinationSuggestions}
-              keyExtractor={(_, idx) => idx.toString()}
+              keyExtractor={(item, idx) => `${item.placeId}-${idx}`}
               renderItem={({ item }) => (
                 <Pressable
                   style={styles.suggestionItem}
@@ -487,7 +451,7 @@ export default function RiderBookingScreen() {
                 >
                   <Ionicons name="location-outline" size={16} color={Colors.primary} />
                   <View style={styles.suggestionText}>
-                    <Text style={styles.suggestionLabel}>{item.label}</Text>
+                    <Text style={styles.suggestionLabel}>{item.displayName}</Text>
                     <Text style={styles.suggestionAddress}>{item.address}</Text>
                   </View>
                 </Pressable>
@@ -524,9 +488,6 @@ export default function RiderBookingScreen() {
       <View style={[styles.container, styles.centerContent]}>
         <Ionicons name="alert-circle-outline" size={48} color={Colors.danger} />
         <Text style={styles.errorText}>{locationError}</Text>
-        <Pressable style={styles.retryButton} onPress={() => window.location.reload()}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </Pressable>
       </View>
     );
   }
@@ -732,7 +693,7 @@ export default function RiderBookingScreen() {
 // ============================================================
 
 function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371; // Earth's radius in km
+  const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const a =
@@ -836,6 +797,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: 'Inter_500Medium',
     color: Colors.text,
+    paddingVertical: 12,
   },
   suggestionsContainer: {
     backgroundColor: Colors.background,
@@ -997,18 +959,6 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginTop: 12,
     textAlign: 'center',
-  },
-  retryButton: {
-    marginTop: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: Colors.primary,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-    color: Colors.white,
   },
   modalOverlay: {
     ...StyleSheet.absoluteFillObject,
