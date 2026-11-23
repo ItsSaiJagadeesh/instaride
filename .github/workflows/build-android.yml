@@ -124,7 +124,10 @@ jobs:
                   raise ValueError('project_id not found in google-services.json')
               out = open(os.environ['GITHUB_ENV'], 'a')
               out.write("FIREBASE_PROJECT_ID_CHECK=" + project + "\nFIREBASE_GOOGLE_SERVICES_FILE=" + sys.argv[1] + "\n")
-          print("Firebase file checked (project id " + project + "). Its contents are not shown.")
+              print("Firebase file checked (project id " + project + "). Its contents are not shown.")
+          except Exception as e:
+              print(f"Error checking Firebase file: {e}")
+              exit(1)
           PY
 
       - name: Make the Android project
