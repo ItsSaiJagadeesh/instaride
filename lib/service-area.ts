@@ -15,7 +15,7 @@ export interface ServiceArea {
 const SERVICE_AREAS: ServiceArea[] = [
   {
     name: 'Jangareddygudem',
-    center: { lat: 17.3521, lng: 80.8341 }, // Approximate center of Jangareddygudem
+    center: { lat: 17.1225, lng: 81.2945 }, // Jangareddygudem (same as the server's default service area)
     radiusKm: 15, // 15 km radius around the city center
     cities: ['Jangareddygudem', 'JRG'],
   },
